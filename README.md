@@ -23,7 +23,11 @@ The WYRD Protocol provides AI characters with an accurate sense of "being" by ma
 
 ---
 
-## Technical Goals
+## 🛠️ The Manifesto: Why Create WYRD Protocol: World-Yielding Real-time Data AI World Model
+
+---
+
+## ⚡ Technical Goals
 
 1.  **Memory Externalization:** Reduce "hallucinations" regarding physical location and object states by offloading environment tracking to the ECS.
 2.  **State Persistence:** Ensure that changes made by an AI or player to the world remain permanent and logically consistent.
