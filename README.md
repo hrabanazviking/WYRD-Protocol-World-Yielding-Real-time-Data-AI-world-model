@@ -1,0 +1,2 @@
+# WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model
+The WYRD Protocol Architecture. The goal is to move the "World Model" out of the LLM's fleeting memory and into a structured Entity-Component-System (ECS). World-class foundation for deterministic AI world-modeling. Light-weight agnostic world-modeling system designed for the next generation of AGI, AI gaming, AI RPGs, and AI charactor systems.
