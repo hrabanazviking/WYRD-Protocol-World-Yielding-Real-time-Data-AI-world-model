@@ -1,6 +1,16 @@
+![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/Image_4343gd.png](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/Image_4343gd.png)
+
+---
+
 # WYRD Protocol: World-Yielding Real-time Data AI World Model
 
 The **WYRD Protocol** is a deterministic architecture designed to move the "World Model" out of an LLM's fleeting context window and into a structured **Entity-Component-System (ECS)**. It serves as a lightweight, agnostic foundation for the next generation of AGI, AI gaming, immersive RPGs, and autonomous character systems.
+
+---
+
+![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/d6e55146-68df-4d21-a51f-d0ae9b83fdf5.jpg](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/d6e55146-68df-4d21-a51f-d0ae9b83fdf5.jpg)
+
+---
 
 ## What is This?
 
@@ -8,6 +18,10 @@ The **WYRD Protocol** is a deterministic architecture designed to move the "Worl
 **World-Yielding Real-time Data**
 
 The WYRD Protocol provides AI characters with an accurate sense of "being" by maintaining a structured, hierarchical ground truth separate from their internal cognitive processes. By bridging the gap between deterministic data and fluid AI roleplay, it ensures that the world remains consistent, even when the LLM's memory fluctuates.
+
+---
+
+![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/fada65a6-9fc2-42f6-88f3-591c48dda900.jpg](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/fada65a6-9fc2-42f6-88f3-591c48dda900.jpg)
 
 ---
 
@@ -43,6 +57,10 @@ Coming soon!
 
 ---
 
+![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/5436b92d-1c4e-4ed4-9cf9-7ef8f36f4cd1.jpg](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/5436b92d-1c4e-4ed4-9cf9-7ef8f36f4cd1.jpg)
+
+---
+
 > "To know the Wyrd is to understand the threads that bind the past to the present, and the data to the destiny."
 
 ---
@@ -54,6 +72,10 @@ You are free to:
 * **Adapt** — remix, transform, and build upon the material for any purpose, even commercially.
 Under the following terms:
 * **Attribution** — You must give appropriate credit to RuneForgeAI, provide a link to the license, and indicate if changes were made.
+
+---
+
+![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/Image_44445343gfg.png](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/Image_44445343gfg.png)
 
 ---
 
