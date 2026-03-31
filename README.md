@@ -8,6 +8,10 @@ The **WYRD Protocol** is a deterministic architecture designed to move the "Worl
 
 ---
 
+![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/Image786hjghj.png](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/Image786hjghj.png)
+
+---
+
 ![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/d6e55146-68df-4d21-a51f-d0ae9b83fdf5.jpg](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/d6e55146-68df-4d21-a51f-d0ae9b83fdf5.jpg)
 
 ---
