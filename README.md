@@ -41,6 +41,10 @@ The WYRD Protocol provides AI characters with an accurate sense of "being" by ma
 
 ---
 
+![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/Image888dvvkdsk3.png](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/Image888dvvkdsk3.png)
+
+---
+
 ## 🛠️ The Manifesto: Why Create WYRD Protocol: World-Yielding Real-time Data AI World Model
 
 ---
