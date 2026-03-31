@@ -1,0 +1,30 @@
+﻿# .aider.conf.yml - Optimized for Volmarr's Modern Viking Rig
+
+
+# Primary Model: Nemotron-3-Super-120B (The "Mimir" of logic)
+model: openrouter/nvidia/nemotron-3-super-120b-a12b:deepinfra
+
+
+# Weak Model: Nemotron-3-Nano (The fast scout for repo maps)
+weak-model: openrouter/nvidia/nemotron-3-nano-30b-a3b:deepinfra
+
+
+# Technical Optimization
+editor-model: openrouter/nvidia/nemotron-3-super-120b-a12b:deepinfra
+map-tokens: 1024
+context-window: 1000000
+
+
+# OpenRouter Specifics
+openai-api-base: https://openrouter.ai/api/v1
+
+
+# Behavior settings
+stream: true
+cache-prompts: true
+check-update: false
+show-diffs: true
+
+
+# Use the custom instructions for Runa's personality
+instructions-file: .aider.instructions.md
