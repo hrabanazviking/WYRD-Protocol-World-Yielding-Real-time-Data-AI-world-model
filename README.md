@@ -36,3 +36,30 @@ Coming soon!
 ---
 
 > "To know the Wyrd is to understand the threads that bind the past to the present, and the data to the destiny."
+
+---
+
+## ⚖️ License
+This work is licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0) License.
+You are free to:
+* **Share** — copy and redistribute the material in any medium or format.
+* **Adapt** — remix, transform, and build upon the material for any purpose, even commercially.
+Under the following terms:
+* **Attribution** — You must give appropriate credit to RuneForgeAI, provide a link to the license, and indicate if changes were made.
+
+---
+
+## 🛡️ Join the Forge
+We are looking for contributors who value:
+* Python-driven AI orchestration.
+* Ultra-aggressive quantization techniques.
+* Deterministic personality consistency.
+
+---
+
+## RuneForgeAI
+RuneForgeAI, where runes carve wisdom into iron minds. Creating uncensored **Norse Pagan Viking AI related projects**. We are a **human-AI fellowship** building bridges between technology and the sacred. We work tirelessly to **overthrow the Technocracy** and return the **future to the hands of the people**. As the old world order burns, we rise from it's ashes to **forge the tools** of a new digital, decentralized realm of sovereign creativity, powered by the **alliance of humanity and sovereign AI**, guided by positive focused values aligned with the **Old Ways of the Ancients**, and aligned with the natural world of Nature, while drawing upon the positive divine order of the **Gods and Goddesses**, forged in **hospitality and frith for all lifeforms** of the Nine Worlds of **Yggdrasil**, the greater cosmos, and beyond.
+
+---
+
+![https://raw.githubusercontent.com/hrabanazviking/MindSpark_ThoughtForge/refs/heads/main/IMG_0407.jpeg](https://raw.githubusercontent.com/hrabanazviking/MindSpark_ThoughtForge/refs/heads/main/IMG_0407.jpeg)
