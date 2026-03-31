@@ -27,6 +27,10 @@ The WYRD Protocol provides AI characters with an accurate sense of "being" by ma
 
 ---
 
+![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/rsezclrsezclrsez.png](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/rsezclrsezclrsez.png)
+
+---
+
 ## ⚡ Technical Goals
 
 1.  **Memory Externalization:** Reduce "hallucinations" regarding physical location and object states by offloading environment tracking to the ECS.
