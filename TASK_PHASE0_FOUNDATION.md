@@ -7,19 +7,22 @@
 ## Checklist
 
 - [x] Write this task file
-- [ ] Promote `research_data/src/wyrdforge/` → `src/wyrdforge/`
-- [ ] Promote `research_data/tests/` → `tests/`
-- [ ] Promote `research_data/config/` → `configs/`
-- [ ] Promote `research_data/examples/` → `examples/`
-- [ ] Promote `research_data/scripts/` → `scripts/`
-- [ ] Reorganize `docs/specs/` → `docs/specs/wyrd/` (WYRD-specific) + `docs/specs/shared/` (MindSpark/shared)
-- [ ] Create `pyproject.toml`
-- [ ] Create `requirements.txt`
-- [ ] Create `.gitignore` (if not exists or update)
-- [ ] Create `.github/workflows/ci.yml`
-- [ ] Verify `pip install -e .` works
-- [ ] Verify `pytest tests/` passes
-- [ ] Commit + push as "phase0: foundation and package setup"
+- [x] Promote `research_data/src/wyrdforge/` → `src/wyrdforge/`
+- [x] Promote `research_data/tests/` → `tests/`
+- [x] Promote `research_data/config/` → `configs/`
+- [x] Promote `research_data/examples/` → `examples/`
+- [x] Promote `research_data/scripts/` → `scripts/`
+- [x] Reorganize `docs/specs/` → `docs/specs/wyrd/` (WYRD-specific) + `docs/specs/shared/` (MindSpark/shared)
+- [x] Create `pyproject.toml`
+- [x] Create `requirements.txt`
+- [x] Create `.gitignore`
+- [x] Create `.github/workflows/ci.yml`
+- [x] Fix `datetime.UTC` → `timezone.utc` for Python 3.10 compat
+- [x] Verify `pip install -e .` works
+- [x] Verify `pytest tests/` — 4/4 passing
+- [x] Commit + push as "phase0: foundation and package setup"
+
+## Status: COMPLETE
 
 ## Key Paths
 

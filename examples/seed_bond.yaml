@@ -1,0 +1,17 @@
+bond:
+  bond_id: bond-001
+  entity_a: user:volmarr
+  entity_b: persona:veyrunn
+  domain: companion
+  status: active
+  vector:
+    trust: 0.86
+    warmth: 0.88
+    familiarity: 0.72
+    devotion: 0.61
+    attraction_affinity: 0.34
+    safety: 0.93
+    sacred_resonance: 0.79
+    playfulness: 0.42
+    vulnerability: 0.58
+    initiative_balance: 0.12

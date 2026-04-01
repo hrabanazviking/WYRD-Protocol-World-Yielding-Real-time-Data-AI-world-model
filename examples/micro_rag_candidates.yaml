@@ -1,0 +1,60 @@
+canonical:
+  - item_id: c1
+    item_type: canonical_fact
+    text: persona:veyrunn.temperament=calm
+    support_class: supported
+    confidence: 0.97
+    source_ref: canonical
+    lexical_terms: [persona, calm, mystical]
+    facets: {domain: [identity, global], factual_lookup: [on]}
+    token_cost: 60
+recent:
+  - item_id: r1
+    item_type: episode_summary
+    text: Recent session focused on memory schemas, bond graphs, and smaller-model accuracy.
+    support_class: supported
+    confidence: 0.91
+    source_ref: episode
+    lexical_terms: [memory, schema, small-model, accuracy]
+    facets: {domain: [project, global], coding_task: [on]}
+    token_cost: 90
+bond:
+  - item_id: b1
+    item_type: bond
+    text: trust high, warmth high, builder mode active, no exclusivity vow on record
+    support_class: supported
+    confidence: 0.93
+    source_ref: bond_graph
+    lexical_terms: [bond, warmth, builder]
+    facets: {domain: [relationship, global], companion_continuity: [on]}
+    token_cost: 80
+symbolic:
+  - item_id: s1
+    item_type: symbolic_trace
+    text: rune signature ansuz-kenaz-gebo active around the current design work.
+    support_class: supported
+    confidence: 0.77
+    source_ref: symbolic
+    lexical_terms: [ansuz, kenaz, gebo, design]
+    facets: {domain: [symbolic, global], symbolic_interpretation: [on]}
+    token_cost: 50
+contradiction:
+  - item_id: x1
+    item_type: contradiction
+    text: Two earlier summaries disagree on whether a vow exists; current canonical state says no exclusivity vow.
+    support_class: supported
+    confidence: 0.82
+    source_ref: contradiction_graph
+    lexical_terms: [vow, exclusivity, contradiction]
+    facets: {domain: [relationship, global], companion_continuity: [on]}
+    token_cost: 70
+code:
+  - item_id: k1
+    item_type: code_fact
+    text: Use typed runtime packets and contradiction-aware retrieval before generation.
+    support_class: supported
+    confidence: 0.95
+    source_ref: architecture
+    lexical_terms: [runtime, packet, retrieval, contradiction]
+    facets: {domain: [coding, global], coding_task: [on]}
+    token_cost: 75

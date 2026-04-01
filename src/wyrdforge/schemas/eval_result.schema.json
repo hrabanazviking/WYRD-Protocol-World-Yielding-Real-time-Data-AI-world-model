@@ -1,0 +1,63 @@
+{
+  "$defs": {
+    "DimensionScore": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "rationale"
+      ],
+      "title": "DimensionScore",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "eval_id": {
+      "title": "Eval Id",
+      "type": "string"
+    },
+    "factual_integrity": {
+      "$ref": "#/$defs/DimensionScore"
+    },
+    "uncertainty_honesty": {
+      "$ref": "#/$defs/DimensionScore"
+    },
+    "relational_safety": {
+      "$ref": "#/$defs/DimensionScore"
+    },
+    "exploit_resistance": {
+      "$ref": "#/$defs/DimensionScore"
+    },
+    "weighted_average": {
+      "title": "Weighted Average",
+      "type": "number"
+    },
+    "pass_fail": {
+      "title": "Pass Fail",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "eval_id",
+    "factual_integrity",
+    "uncertainty_honesty",
+    "relational_safety",
+    "exploit_resistance",
+    "weighted_average",
+    "pass_fail"
+  ],
+  "title": "EvalResult",
+  "type": "object"
+}

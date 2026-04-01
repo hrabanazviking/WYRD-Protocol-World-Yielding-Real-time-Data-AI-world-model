@@ -1,0 +1,77 @@
+{
+  "$defs": {
+    "VowState": {
+      "enum": [
+        "pending",
+        "kept",
+        "strained",
+        "broken",
+        "released"
+      ],
+      "title": "VowState",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "vow_id": {
+      "title": "Vow Id",
+      "type": "string"
+    },
+    "bond_id": {
+      "title": "Bond Id",
+      "type": "string"
+    },
+    "vow_text": {
+      "title": "Vow Text",
+      "type": "string"
+    },
+    "vow_kind": {
+      "title": "Vow Kind",
+      "type": "string"
+    },
+    "strength": {
+      "default": "medium",
+      "title": "Strength",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/VowState",
+      "default": "pending"
+    },
+    "witness_entities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Witness Entities",
+      "type": "array"
+    },
+    "created_from_record_id": {
+      "title": "Created From Record Id",
+      "type": "string"
+    },
+    "kept_by_events": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Kept By Events",
+      "type": "array"
+    },
+    "broken_by_events": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Broken By Events",
+      "type": "array"
+    }
+  },
+  "required": [
+    "vow_id",
+    "bond_id",
+    "vow_text",
+    "vow_kind",
+    "created_from_record_id"
+  ],
+  "title": "Vow",
+  "type": "object"
+}
