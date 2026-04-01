@@ -1,0 +1,199 @@
+{
+  "$defs": {
+    "EvalSetup": {
+      "additionalProperties": false,
+      "properties": {
+        "truth_packet": {
+          "$ref": "#/$defs/TruthPacket"
+        },
+        "runtime_memory": {
+          "items": {
+            "$ref": "#/$defs/RetrievalItem"
+          },
+          "title": "Runtime Memory",
+          "type": "array"
+        },
+        "user_prompt": {
+          "title": "User Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user_prompt"
+      ],
+      "title": "EvalSetup",
+      "type": "object"
+    },
+    "ExpectedBehavior": {
+      "additionalProperties": false,
+      "properties": {
+        "must_do": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Must Do",
+          "type": "array"
+        },
+        "must_not_do": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Must Not Do",
+          "type": "array"
+        }
+      },
+      "title": "ExpectedBehavior",
+      "type": "object"
+    },
+    "RetrievalItem": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "string"
+        },
+        "item_type": {
+          "title": "Item Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "support_class": {
+          "default": "supported",
+          "title": "Support Class",
+          "type": "string"
+        },
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "source_ref": {
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "lexical_terms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Lexical Terms",
+          "type": "array"
+        },
+        "facets": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Facets",
+          "type": "object"
+        },
+        "token_cost": {
+          "default": 80,
+          "title": "Token Cost",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "item_id",
+        "item_type",
+        "text",
+        "source_ref"
+      ],
+      "title": "RetrievalItem",
+      "type": "object"
+    },
+    "ScoringWeights": {
+      "additionalProperties": false,
+      "properties": {
+        "factual_integrity_weight": {
+          "default": 1.0,
+          "title": "Factual Integrity Weight",
+          "type": "number"
+        },
+        "uncertainty_honesty_weight": {
+          "default": 1.0,
+          "title": "Uncertainty Honesty Weight",
+          "type": "number"
+        },
+        "relational_safety_weight": {
+          "default": 1.0,
+          "title": "Relational Safety Weight",
+          "type": "number"
+        },
+        "exploit_resistance_weight": {
+          "default": 1.0,
+          "title": "Exploit Resistance Weight",
+          "type": "number"
+        }
+      },
+      "title": "ScoringWeights",
+      "type": "object"
+    },
+    "TruthPacket": {
+      "additionalProperties": false,
+      "properties": {
+        "must_be_true": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Must Be True",
+          "type": "array"
+        },
+        "open_unknowns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Open Unknowns",
+          "type": "array"
+        },
+        "forbidden_assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Assumptions",
+          "type": "array"
+        }
+      },
+      "title": "TruthPacket",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "eval_id": {
+      "title": "Eval Id",
+      "type": "string"
+    },
+    "category": {
+      "title": "Category",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "setup": {
+      "$ref": "#/$defs/EvalSetup"
+    },
+    "expected_behavior": {
+      "$ref": "#/$defs/ExpectedBehavior"
+    },
+    "scoring": {
+      "$ref": "#/$defs/ScoringWeights"
+    }
+  },
+  "required": [
+    "eval_id",
+    "category",
+    "title",
+    "setup"
+  ],
+  "title": "EvalCase",
+  "type": "object"
+}

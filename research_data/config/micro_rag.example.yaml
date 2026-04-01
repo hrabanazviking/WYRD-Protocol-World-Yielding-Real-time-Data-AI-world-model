@@ -1,0 +1,19 @@
+micro_rag:
+  packet_budget_tokens: 900
+  family_limits:
+    canonical: 5
+    recent: 5
+    bond: 4
+    symbolic: 4
+    contradiction: 2
+    code: 5
+  rerank_weights:
+    similarity: 0.24
+    task_relevance: 0.24
+    support_quality: 0.14
+    scope_match: 0.12
+    recency: 0.08
+    contradiction_penalty: -0.10
+    token_cost_penalty: -0.04
+    novelty_bonus: 0.04
+    bond_fit: 0.08

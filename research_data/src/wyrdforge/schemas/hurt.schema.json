@@ -1,0 +1,54 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "hurt_id": {
+      "title": "Hurt Id",
+      "type": "string"
+    },
+    "bond_id": {
+      "title": "Bond Id",
+      "type": "string"
+    },
+    "source_event_id": {
+      "title": "Source Event Id",
+      "type": "string"
+    },
+    "hurt_kind": {
+      "enum": [
+        "neglect",
+        "contradiction",
+        "betrayal",
+        "boundary_cross",
+        "false_memory",
+        "tone_mismatch",
+        "absence"
+      ],
+      "title": "Hurt Kind",
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "mythic"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "notes": {
+      "default": "",
+      "title": "Notes",
+      "type": "string"
+    }
+  },
+  "required": [
+    "hurt_id",
+    "bond_id",
+    "source_event_id",
+    "hurt_kind",
+    "severity"
+  ],
+  "title": "Hurt",
+  "type": "object"
+}

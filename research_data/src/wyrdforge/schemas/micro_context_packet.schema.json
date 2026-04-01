@@ -1,0 +1,224 @@
+{
+  "$defs": {
+    "QueryMode": {
+      "enum": [
+        "factual_lookup",
+        "companion_continuity",
+        "world_state",
+        "symbolic_interpretation",
+        "coding_task",
+        "repair_or_boundary",
+        "creative_generation"
+      ],
+      "title": "QueryMode",
+      "type": "string"
+    },
+    "RankedCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "string"
+        },
+        "item_type": {
+          "title": "Item Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "support_class": {
+          "default": "supported",
+          "title": "Support Class",
+          "type": "string"
+        },
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "source_ref": {
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "lexical_terms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Lexical Terms",
+          "type": "array"
+        },
+        "facets": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Facets",
+          "type": "object"
+        },
+        "token_cost": {
+          "default": 80,
+          "title": "Token Cost",
+          "type": "integer"
+        },
+        "final_score": {
+          "default": 0.0,
+          "title": "Final Score",
+          "type": "number"
+        },
+        "similarity": {
+          "default": 0.0,
+          "title": "Similarity",
+          "type": "number"
+        },
+        "task_relevance": {
+          "default": 0.0,
+          "title": "Task Relevance",
+          "type": "number"
+        },
+        "support_quality": {
+          "default": 0.0,
+          "title": "Support Quality",
+          "type": "number"
+        },
+        "scope_match": {
+          "default": 0.0,
+          "title": "Scope Match",
+          "type": "number"
+        },
+        "recency": {
+          "default": 0.0,
+          "title": "Recency",
+          "type": "number"
+        },
+        "contradiction_penalty": {
+          "default": 0.0,
+          "title": "Contradiction Penalty",
+          "type": "number"
+        },
+        "token_cost_penalty": {
+          "default": 0.0,
+          "title": "Token Cost Penalty",
+          "type": "number"
+        },
+        "novelty_bonus": {
+          "default": 0.0,
+          "title": "Novelty Bonus",
+          "type": "number"
+        },
+        "bond_fit": {
+          "default": 0.0,
+          "title": "Bond Fit",
+          "type": "number"
+        }
+      },
+      "required": [
+        "item_id",
+        "item_type",
+        "text",
+        "source_ref"
+      ],
+      "title": "RankedCandidate",
+      "type": "object"
+    },
+    "TruthPacket": {
+      "additionalProperties": false,
+      "properties": {
+        "must_be_true": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Must Be True",
+          "type": "array"
+        },
+        "open_unknowns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Open Unknowns",
+          "type": "array"
+        },
+        "forbidden_assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Assumptions",
+          "type": "array"
+        }
+      },
+      "title": "TruthPacket",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "mode": {
+      "$ref": "#/$defs/QueryMode"
+    },
+    "goal": {
+      "title": "Goal",
+      "type": "string"
+    },
+    "truth_packet": {
+      "$ref": "#/$defs/TruthPacket"
+    },
+    "canonical_facts": {
+      "items": {
+        "$ref": "#/$defs/RankedCandidate"
+      },
+      "title": "Canonical Facts",
+      "type": "array"
+    },
+    "recent_events": {
+      "items": {
+        "$ref": "#/$defs/RankedCandidate"
+      },
+      "title": "Recent Events",
+      "type": "array"
+    },
+    "bond_excerpt": {
+      "items": {
+        "$ref": "#/$defs/RankedCandidate"
+      },
+      "title": "Bond Excerpt",
+      "type": "array"
+    },
+    "symbolic_context": {
+      "items": {
+        "$ref": "#/$defs/RankedCandidate"
+      },
+      "title": "Symbolic Context",
+      "type": "array"
+    },
+    "code_context": {
+      "items": {
+        "$ref": "#/$defs/RankedCandidate"
+      },
+      "title": "Code Context",
+      "type": "array"
+    },
+    "contradiction_items": {
+      "items": {
+        "$ref": "#/$defs/RankedCandidate"
+      },
+      "title": "Contradiction Items",
+      "type": "array"
+    },
+    "packet_budget_used": {
+      "default": 0,
+      "title": "Packet Budget Used",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "mode",
+    "goal"
+  ],
+  "title": "MicroContextPacket",
+  "type": "object"
+}

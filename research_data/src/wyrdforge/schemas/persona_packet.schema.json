@@ -1,0 +1,163 @@
+{
+  "$defs": {
+    "PersonaMode": {
+      "enum": [
+        "companion",
+        "coding_guide",
+        "world_seer",
+        "ritual",
+        "debrief"
+      ],
+      "title": "PersonaMode",
+      "type": "string"
+    },
+    "PersonaSourceItem": {
+      "additionalProperties": false,
+      "properties": {
+        "record_id": {
+          "title": "Record Id",
+          "type": "string"
+        },
+        "item_type": {
+          "title": "Item Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "record_id",
+        "item_type",
+        "text"
+      ],
+      "title": "PersonaSourceItem",
+      "type": "object"
+    },
+    "TraitSignal": {
+      "additionalProperties": false,
+      "properties": {
+        "trait_name": {
+          "title": "Trait Name",
+          "type": "string"
+        },
+        "weight": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Weight",
+          "type": "number"
+        },
+        "supporting_record_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supporting Record Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "trait_name"
+      ],
+      "title": "TraitSignal",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "persona_id": {
+      "title": "Persona Id",
+      "type": "string"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/$defs/PersonaMode"
+    },
+    "tone_contract": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tone Contract",
+      "type": "array"
+    },
+    "identity_core": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Identity Core",
+      "type": "array"
+    },
+    "active_traits": {
+      "items": {
+        "$ref": "#/$defs/TraitSignal"
+      },
+      "title": "Active Traits",
+      "type": "array"
+    },
+    "relationship_excerpt": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Relationship Excerpt",
+      "type": "array"
+    },
+    "truth_anchor_points": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Truth Anchor Points",
+      "type": "array"
+    },
+    "uncertainty_points": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Uncertainty Points",
+      "type": "array"
+    },
+    "symbolic_context": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Symbolic Context",
+      "type": "array"
+    },
+    "response_guidance": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Response Guidance",
+      "type": "array"
+    },
+    "source_items": {
+      "items": {
+        "$ref": "#/$defs/PersonaSourceItem"
+      },
+      "title": "Source Items",
+      "type": "array"
+    },
+    "token_budget_hint": {
+      "default": 800,
+      "title": "Token Budget Hint",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "persona_id",
+    "user_id",
+    "mode"
+  ],
+  "title": "PersonaPacket",
+  "type": "object"
+}

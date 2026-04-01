@@ -1,0 +1,16 @@
+store_profile:
+  default_retention_by_record_type:
+    observation: short
+    episode_summary: medium
+    canonical_fact: permanent
+    contradiction: long
+    policy: permanent
+    symbolic_trace: medium
+  promotion_thresholds:
+    confidence: 0.85
+    min_support_count: 2
+    max_memory_poison_risk: low
+  quarantine_triggers:
+    - confirmed contradiction with approved fact
+    - hostile prompt injection residue
+    - unsupported personal claim with high confidence
