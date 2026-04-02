@@ -20,5 +20,6 @@
 - Create a plugin for Voxta.
 - Create a plugin for SillyTavern.
 - Create a plugin for Kindroid.
+- Create a plugin for OpenSim (related to Second Life).
 
   
