@@ -1,0 +1,13 @@
+- Finish all current phases of development.
+- Create a plugin for Unreal Engine.
+- Create a plugin for Unity Engine.
+- Create a plugin for Godot Engine.
+- Create a plugin for Gamemaker Engine.
+- Create a plugin for CryEngine.
+- Create a plugin for Construct 3 Engine.
+- Create a plugin for Amazon Lumberyard.
+- Create a plugin for RPG Maker.
+- Create a plugin for Monogame Engine.
+- Create a plugin for Defold Engine.
+- Create a plugin for 
+  
