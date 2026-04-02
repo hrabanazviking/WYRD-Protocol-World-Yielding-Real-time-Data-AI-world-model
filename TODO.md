@@ -1,4 +1,5 @@
 - Finish all current phases of development.
+- Install the Claude Code plugin, Prima Scholar.
 - Create a plugin for Unreal Engine.
 - Create a plugin for Unity Engine.
 - Create a plugin for Godot Engine.
