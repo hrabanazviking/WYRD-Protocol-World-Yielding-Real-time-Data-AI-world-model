@@ -9,5 +9,9 @@
 - Create a plugin for RPG Maker.
 - Create a plugin for Monogame Engine.
 - Create a plugin for Defold Engine.
-- Create a plugin for 
+- Create a plugin for D&D Beyond.
+- Create a plugin for Roll20.
+- Create a plugin for Foundry VTT.
+- Create a plugin for Fantasy Grounds Unity.
+- Create a plugin for Owlbear Rodeo
   
