@@ -16,4 +16,9 @@
 - Create a plugin for Owlbear Rodeo.
 - Create a plugin for Minecraft.
 - Create a plugin for Roblox.
+- Create a plugin for Norse Saga Engine.
+- Create a plugin for Voxta.
+- Create a plugin for SillyTavern.
+- Create a plugin for Kindroid.
+
   
