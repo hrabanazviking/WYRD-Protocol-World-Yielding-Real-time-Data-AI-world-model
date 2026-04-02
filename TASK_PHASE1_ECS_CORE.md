@@ -36,19 +36,19 @@
 
 ## Checklist
 - [x] Write this task file
-- [ ] ecs/entity.py
-- [ ] ecs/component.py + registry
-- [ ] ecs/world.py
-- [ ] ecs/system.py
-- [ ] ecs/yggdrasil.py
-- [ ] ecs/components/ (identity, spatial, physical, character)
-- [ ] ecs/systems/ (presence, state_transition)
-- [ ] persistence/world_store.py
-- [ ] loaders/world_loader.py
-- [ ] configs/worlds/thornholt.yaml
-- [ ] wyrd_world_cli.py
-- [ ] tests/ (all 4 test files, 60+ tests)
-- [ ] pytest passing
-- [ ] Commit + push
+- [x] ecs/entity.py
+- [x] ecs/component.py + registry
+- [x] ecs/world.py
+- [x] ecs/system.py + WorldRunner
+- [x] ecs/yggdrasil.py
+- [x] ecs/components/ (identity, spatial, physical, character)
+- [x] ecs/systems/ (presence, state_transition)
+- [x] persistence/world_store.py
+- [x] loaders/world_loader.py
+- [x] configs/worlds/thornholt.yaml
+- [x] wyrd_world_cli.py
+- [x] tests/ (4 test files — 106 tests total)
+- [x] pytest — 106/106 passing
+- [x] Commit + push
 
-## Status: IN PROGRESS
+## Status: COMPLETE
