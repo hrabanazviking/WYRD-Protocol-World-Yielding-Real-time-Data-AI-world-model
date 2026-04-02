@@ -21,5 +21,9 @@
 - Create a plugin for SillyTavern.
 - Create a plugin for Kindroid.
 - Create a plugin for OpenSim (related to Second Life).
+- Create a plugin for OpenClaw.
+- Create a plugin for Hermes Agent.
+- Create a plugin for AgentZero.
+
 
   
