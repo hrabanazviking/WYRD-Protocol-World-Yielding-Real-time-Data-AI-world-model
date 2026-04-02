@@ -1,0 +1,33 @@
+# Memory Promotion Configuration
+# Controls when records are automatically eligible for promotion
+# from EPHEMERAL → PROMOTABLE → CANONICAL
+
+promotion:
+  # Minimum confidence score to be considered for auto-promotion
+  confidence_threshold: 0.80
+
+  # Minimum access count before a record is eligible
+  access_count_min: 2
+
+  # Promotion score threshold (0.0 - 1.0) — records above this get marked PROMOTABLE
+  auto_promote_score_threshold: 0.70
+
+  # Score weights for promotion scoring
+  weights:
+    confidence: 0.40
+    access_count: 0.20   # normalized by access_count_min
+    recency: 0.20        # how recently accessed vs created
+    priority: 0.20       # retrieval.default_priority
+
+decay:
+  # Days after which a record's confidence decays if not accessed
+  stale_after_days:
+    ephemeral: 7
+    short: 30
+    medium: 90
+    long: 365
+    permanent: null      # never decays
+
+  # How much to reduce confidence per stale period
+  confidence_decay_per_period: 0.10
+  minimum_confidence: 0.10
