@@ -281,7 +281,7 @@ Phase 8 (SDK layer)
 |---|---|---|
 | 8A — JS/TS SDK | complete | sdk/js/ |
 | 8B — C# SDK | complete | sdk/csharp/ |
-| 8C — GDScript module | pending | |
+| 8C — GDScript module | complete | sdk/gdscript/ |
 | 9A — OpenClaw | complete | src/wyrdforge/bridges/openclaw_bridge.py |
 | 9B — NSE | complete | src/wyrdforge/bridges/nse_bridge.py |
 | 9C — SillyTavern | complete | integrations/sillytavern/wyrdforge/ |
@@ -294,8 +294,8 @@ Phase 8 (SDK layer)
 | 10C — Fantasy Grounds Unity | complete | integrations/fgu/ |
 | 10D — Owlbear Rodeo | complete | integrations/owlbear/wyrdforge/ |
 | 10E — D&D Beyond | complete | integrations/dndbeyond/wyrdforge/ |
-| 11A — Godot 4 | pending | |
-| 11B — RPG Maker | pending | |
+| 11A — Godot 4 | complete | integrations/godot/wyrdforge/ |
+| 11B — RPG Maker | complete | integrations/rpgmaker/wyrdforge/ |
 | 11C — GameMaker | pending | |
 | 11D — Construct 3 | pending | |
 | 11E — MonoGame | pending | |
