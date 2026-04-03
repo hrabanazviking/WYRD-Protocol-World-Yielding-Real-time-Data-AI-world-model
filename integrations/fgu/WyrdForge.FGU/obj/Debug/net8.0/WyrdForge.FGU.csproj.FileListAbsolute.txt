@@ -1,0 +1,16 @@
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\bin\Debug\net8.0\WyrdForge.FGU.deps.json
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\bin\Debug\net8.0\WyrdForge.FGU.dll
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\bin\Debug\net8.0\WyrdForge.FGU.pdb
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\bin\Debug\net8.0\WyrdForge.Client.dll
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\bin\Debug\net8.0\WyrdForge.Client.pdb
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForge.FGU.csproj.AssemblyReference.cache
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForge.FGU.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForge.FGU.AssemblyInfoInputs.cache
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForge.FGU.AssemblyInfo.cs
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForge.FGU.csproj.CoreCompileInputs.cache
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForge.FGU.sourcelink.json
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForg.2BF9BE35.Up2Date
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForge.FGU.dll
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\refint\WyrdForge.FGU.dll
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\WyrdForge.FGU.pdb
+C:\Users\volma\runa\WYRD-Protocol\integrations\fgu\WyrdForge.FGU\obj\Debug\net8.0\ref\WyrdForge.FGU.dll
