@@ -1,0 +1,21 @@
+{
+  "id": "wyrdforge",
+  "title": "WyrdForge — WYRD World Context",
+  "description": "Connects Foundry VTT to a running WyrdHTTPServer. Injects deterministic world-state context into chat and actor sheets, keeping your AI companions grounded in real world truth.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "12"
+  },
+  "authors": [
+    {
+      "name": "RuneForgeAI",
+      "url": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model"
+    }
+  ],
+  "esmodules": ["scripts/wyrdforge.js"],
+  "styles": ["styles/wyrdforge.css"],
+  "languages": [],
+  "url": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+  "manifest": "https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/development/integrations/foundry/wyrdforge/module.json"
+}
