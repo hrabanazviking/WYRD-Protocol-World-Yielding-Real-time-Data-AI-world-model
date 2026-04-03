@@ -25,6 +25,7 @@
 - Create a plugin for OpenClaw.
 - Create a plugin for Hermes Agent.
 - Create a plugin for AgentZero.
+- Create a plugin for pygame (I forked it here https://github.com/hrabanazviking/pygame ).
 - Make complete technical references for the user about how to use this system, and how to integrate it into the various programs it can be used with. Make the information as user friendly and easy to understand as possible, with very technical information as well.
 - Make auto, robust, self healing, crash proof, install scripts for setting up WYRD with the various programs it is designed to work with.
 - Do lots of work to make all the codebase more robust, self healing, crash proof.
