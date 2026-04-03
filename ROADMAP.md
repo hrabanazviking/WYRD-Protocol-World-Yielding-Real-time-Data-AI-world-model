@@ -289,11 +289,11 @@ Phase 8 (SDK layer)
 | 9E — Kindroid | complete | src/wyrdforge/bridges/kindroid_bridge.py |
 | 9F — Hermes Agent | complete | src/wyrdforge/bridges/hermes_bridge.py |
 | 9G — AgentZero | complete | src/wyrdforge/bridges/agentzero_bridge.py |
-| 10A — Foundry VTT | pending | |
-| 10B — Roll20 | pending | |
-| 10C — Fantasy Grounds Unity | pending | |
-| 10D — Owlbear Rodeo | pending | |
-| 10E — D&D Beyond | pending | |
+| 10A — Foundry VTT | complete | integrations/foundry/wyrdforge/ |
+| 10B — Roll20 | complete | integrations/roll20/wyrdforge/ |
+| 10C — Fantasy Grounds Unity | complete | integrations/fgu/ |
+| 10D — Owlbear Rodeo | complete | integrations/owlbear/wyrdforge/ |
+| 10E — D&D Beyond | complete | integrations/dndbeyond/wyrdforge/ |
 | 11A — Godot 4 | pending | |
 | 11B — RPG Maker | pending | |
 | 11C — GameMaker | pending | |
