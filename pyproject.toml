@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wyrdforge"
-version = "0.1.0"
+version = "1.0.0"
 description = "WYRD Protocol — World-Yielding Real-time Data AI World Model"
 readme = "README.md"
 license = { text = "CC BY 4.0" }
