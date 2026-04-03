@@ -279,16 +279,16 @@ Phase 8 (SDK layer)
 
 | Phase | Status | Target |
 |---|---|---|
-| 8A — JS/TS SDK | pending | |
-| 8B — C# SDK | pending | |
+| 8A — JS/TS SDK | complete | sdk/js/ |
+| 8B — C# SDK | complete | sdk/csharp/ |
 | 8C — GDScript module | pending | |
-| 9A — OpenClaw | pending | |
-| 9B — NSE | pending | |
-| 9C — SillyTavern | pending | |
-| 9D — Voxta | pending | |
-| 9E — Kindroid | pending | |
-| 9F — Hermes Agent | pending | |
-| 9G — AgentZero | pending | |
+| 9A — OpenClaw | complete | src/wyrdforge/bridges/openclaw_bridge.py |
+| 9B — NSE | complete | src/wyrdforge/bridges/nse_bridge.py |
+| 9C — SillyTavern | complete | integrations/sillytavern/wyrdforge/ |
+| 9D — Voxta | complete | src/wyrdforge/bridges/voxta_bridge.py |
+| 9E — Kindroid | complete | src/wyrdforge/bridges/kindroid_bridge.py |
+| 9F — Hermes Agent | complete | src/wyrdforge/bridges/hermes_bridge.py |
+| 9G — AgentZero | complete | src/wyrdforge/bridges/agentzero_bridge.py |
 | 10A — Foundry VTT | pending | |
 | 10B — Roll20 | pending | |
 | 10C — Fantasy Grounds Unity | pending | |
