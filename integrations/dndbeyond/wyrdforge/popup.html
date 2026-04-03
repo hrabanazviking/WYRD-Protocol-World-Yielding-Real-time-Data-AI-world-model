@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WyrdForge Settings</title>
+  <style>
+    body { width: 280px; margin: 0; padding: 12px; background: #1a1a2e; color: #c8b8a2; font-family: sans-serif; font-size: 13px; }
+    h3 { color: #d4a853; margin: 0 0 10px 0; font-size: 1em; }
+    label { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; font-size: 0.85em; color: #aaa; }
+    input[type="text"], input[type="number"] { background: #16213e; border: 1px solid #7a5c3a; border-radius: 3px; color: #c8b8a2; padding: 4px 6px; font-size: 0.9em; }
+    input[type="checkbox"] { width: 16px; height: 16px; accent-color: #d4a853; }
+    .row { display: flex; align-items: center; gap: 6px; }
+    button { background: #7a5c3a; border: none; border-radius: 3px; color: #fff; padding: 6px 12px; cursor: pointer; font-size: 0.9em; width: 100%; }
+    button:hover { background: #d4a853; color: #1a1a2e; }
+    #status { font-size: 0.8em; margin-top: 6px; color: #888; }
+  </style>
+</head>
+<body>
+  <h3>&#x16B9; WyrdForge</h3>
+  <label>Host<input id="host" type="text" value="localhost"></label>
+  <label>Port<input id="port" type="number" value="8765" min="1" max="65535"></label>
+  <label><span class="row"><input id="enabled" type="checkbox" checked> Enable on DDB pages</span></label>
+  <button id="save">Save Settings</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

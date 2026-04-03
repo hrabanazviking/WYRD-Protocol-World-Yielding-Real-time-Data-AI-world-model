@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "WyrdForge — D&D Beyond Integration",
+  "description": "Injects WYRD Protocol world context into D&D Beyond character and monster pages. Requires a running WyrdHTTPServer on localhost.",
+  "version": "1.0.0",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.dndbeyond.com/*", "http://localhost/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.dndbeyond.com/characters/*", "https://www.dndbeyond.com/monsters/*", "https://www.dndbeyond.com/npcs/*"],
+      "js": ["content.js"],
+      "css": ["wyrdforge.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "WyrdForge"
+  }
+}

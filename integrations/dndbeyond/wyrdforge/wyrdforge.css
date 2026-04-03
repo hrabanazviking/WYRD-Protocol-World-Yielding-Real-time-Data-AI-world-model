@@ -1,0 +1,68 @@
+/* WyrdForge — D&D Beyond extension styles */
+
+#wyrdforge-ddb-panel,
+.wyrd-ddb-panel {
+  border: 1px solid #7a5c3a;
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: #1a1a2e;
+  color: #c8b8a2;
+  font-size: 0.85em;
+  margin: 8px 0;
+}
+
+.wyrd-title {
+  color: #d4a853;
+  margin: 0 0 4px 0;
+  font-size: 0.95em;
+}
+
+.wyrd-spinner {
+  display: inline-block;
+  margin-left: 6px;
+  animation: wyrd-spin 1s linear infinite;
+}
+
+@keyframes wyrd-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.wyrd-persona-label {
+  font-size: 0.8em;
+  color: #aaa;
+  margin: 0 0 6px 0;
+}
+
+.wyrd-ddb-panel .wyrd-refresh {
+  background: #7a5c3a;
+  border: none;
+  border-radius: 3px;
+  color: #fff;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 0.8em;
+}
+
+.wyrd-ddb-panel .wyrd-refresh:hover {
+  background: #d4a853;
+  color: #1a1a2e;
+}
+
+.wyrd-error {
+  color: #e07070;
+  font-size: 0.8em;
+  margin: 6px 0 0;
+}
+
+pre.wyrd-output {
+  white-space: pre-wrap;
+  font-size: 0.8em;
+  background: #16213e;
+  border: 1px solid #7a5c3a;
+  border-radius: 3px;
+  padding: 6px;
+  margin: 6px 0 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
