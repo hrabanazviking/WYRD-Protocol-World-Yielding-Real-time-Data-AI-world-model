@@ -25,6 +25,12 @@
 - Create a plugin for OpenClaw.
 - Create a plugin for Hermes Agent.
 - Create a plugin for AgentZero.
+- Make complete technical references for the user about how to use this system, and how to integrate it into the various programs it can be used with. Make the information as user friendly and easy to understand as possible, with very technical information as well.
+- Make auto, robust, self healing, crash proof, install scripts for setting up WYRD with the various programs it is designed to work with.
+- Do lots of work to make all the codebase more robust, self healing, crash proof.
+- Do extensive bug hunting and bug fixing.
+- Trace the functions of all plugins and integrations to be sure they work really well with the programs they are designed to work with.
+- Create a single menu driven install script that is super automated and asks the user what they want to set WYRD for, and asks any need information of the user to get a extremely solid well working setup. Make sure it is robust, self healing, crash proof.
 
 
   
