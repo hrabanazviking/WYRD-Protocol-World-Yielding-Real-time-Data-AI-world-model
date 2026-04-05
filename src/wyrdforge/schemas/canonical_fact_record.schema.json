@@ -1,0 +1,541 @@
+{
+  "$defs": {
+    "ApprovalState": {
+      "enum": [
+        "pending",
+        "approved",
+        "quarantined",
+        "rejected"
+      ],
+      "title": "ApprovalState",
+      "type": "string"
+    },
+    "Audit": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "created_by_agent": {
+          "title": "Created By Agent",
+          "type": "string"
+        },
+        "updated_by_agent": {
+          "title": "Updated By Agent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "updated_at",
+        "created_by_agent",
+        "updated_by_agent"
+      ],
+      "title": "Audit",
+      "type": "object"
+    },
+    "CanonicalFactContent": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "body_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Body Ref"
+        },
+        "structured_payload": {
+          "$ref": "#/$defs/CanonicalFactPayload"
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "structured_payload"
+      ],
+      "title": "CanonicalFactContent",
+      "type": "object"
+    },
+    "CanonicalFactPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_subject_id": {
+          "title": "Fact Subject Id",
+          "type": "string"
+        },
+        "fact_key": {
+          "title": "Fact Key",
+          "type": "string"
+        },
+        "fact_value": {
+          "title": "Fact Value",
+          "type": "string"
+        },
+        "value_type": {
+          "default": "string",
+          "title": "Value Type",
+          "type": "string"
+        },
+        "domain": {
+          "default": "general",
+          "title": "Domain",
+          "type": "string"
+        },
+        "support_record_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Support Record Ids",
+          "type": "array"
+        },
+        "supersedes_record_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Record Id"
+        }
+      },
+      "required": [
+        "fact_subject_id",
+        "fact_key",
+        "fact_value"
+      ],
+      "title": "CanonicalFactPayload",
+      "type": "object"
+    },
+    "ContradictionStatus": {
+      "enum": [
+        "none",
+        "candidate",
+        "confirmed"
+      ],
+      "title": "ContradictionStatus",
+      "type": "string"
+    },
+    "DecayCurve": {
+      "enum": [
+        "none",
+        "linear",
+        "exp",
+        "step"
+      ],
+      "title": "DecayCurve",
+      "type": "string"
+    },
+    "EntityScope": {
+      "additionalProperties": false,
+      "properties": {
+        "primary_subjects": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Primary Subjects",
+          "type": "array"
+        },
+        "secondary_subjects": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Secondary Subjects",
+          "type": "array"
+        },
+        "scene_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scene Id"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "world_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "World Id"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project Id"
+        }
+      },
+      "title": "EntityScope",
+      "type": "object"
+    },
+    "Governance": {
+      "additionalProperties": false,
+      "properties": {
+        "sensitivity": {
+          "$ref": "#/$defs/Sensitivity",
+          "default": "low"
+        },
+        "memory_poison_risk": {
+          "$ref": "#/$defs/RiskLevel",
+          "default": "low"
+        },
+        "allowed_for_runtime": {
+          "default": true,
+          "title": "Allowed For Runtime",
+          "type": "boolean"
+        },
+        "allowed_for_training": {
+          "default": false,
+          "title": "Allowed For Training",
+          "type": "boolean"
+        },
+        "requires_review_before_promotion": {
+          "default": true,
+          "title": "Requires Review Before Promotion",
+          "type": "boolean"
+        }
+      },
+      "title": "Governance",
+      "type": "object"
+    },
+    "Lifecycle": {
+      "additionalProperties": false,
+      "properties": {
+        "write_policy": {
+          "$ref": "#/$defs/WritePolicy",
+          "default": "ephemeral"
+        },
+        "retention_class": {
+          "$ref": "#/$defs/RetentionClass",
+          "default": "short"
+        },
+        "decay_curve": {
+          "$ref": "#/$defs/DecayCurve",
+          "default": "none"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "last_accessed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Accessed At"
+        },
+        "access_count": {
+          "default": 0,
+          "title": "Access Count",
+          "type": "integer"
+        },
+        "stale_after_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stale After Days"
+        }
+      },
+      "title": "Lifecycle",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "source_type": {
+          "title": "Source Type",
+          "type": "string"
+        },
+        "source_ref": {
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "source_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Hash"
+        },
+        "extracted_at": {
+          "format": "date-time",
+          "title": "Extracted At",
+          "type": "string"
+        },
+        "extracted_by": {
+          "title": "Extracted By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "source_ref",
+        "extracted_at",
+        "extracted_by"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "RetentionClass": {
+      "enum": [
+        "short",
+        "medium",
+        "long",
+        "permanent"
+      ],
+      "title": "RetentionClass",
+      "type": "string"
+    },
+    "RetrievalMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "embedding_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding Id"
+        },
+        "lexical_terms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Lexical Terms",
+          "type": "array"
+        },
+        "facets": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Facets",
+          "type": "object"
+        },
+        "default_priority": {
+          "default": 0.0,
+          "title": "Default Priority",
+          "type": "number"
+        }
+      },
+      "title": "RetrievalMeta",
+      "type": "object"
+    },
+    "RiskLevel": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    },
+    "Sensitivity": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Sensitivity",
+      "type": "string"
+    },
+    "SupportClass": {
+      "enum": [
+        "supported",
+        "inferred",
+        "speculative",
+        "creative",
+        "policy"
+      ],
+      "title": "SupportClass",
+      "type": "string"
+    },
+    "TruthMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "support_class": {
+          "$ref": "#/$defs/SupportClass",
+          "default": "supported"
+        },
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "contradiction_status": {
+          "$ref": "#/$defs/ContradictionStatus",
+          "default": "none"
+        },
+        "approval_state": {
+          "$ref": "#/$defs/ApprovalState",
+          "default": "pending"
+        }
+      },
+      "title": "TruthMeta",
+      "type": "object"
+    },
+    "WritePolicy": {
+      "enum": [
+        "ephemeral",
+        "reviewed",
+        "promotable",
+        "canonical",
+        "immutable"
+      ],
+      "title": "WritePolicy",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "record_id": {
+      "title": "Record Id",
+      "type": "string"
+    },
+    "store": {
+      "const": "mimir_canonical_store",
+      "default": "mimir_canonical_store",
+      "title": "Store",
+      "type": "string"
+    },
+    "record_type": {
+      "const": "canonical_fact",
+      "default": "canonical_fact",
+      "title": "Record Type",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "system_id": {
+      "title": "System Id",
+      "type": "string"
+    },
+    "entity_scope": {
+      "$ref": "#/$defs/EntityScope"
+    },
+    "content": {
+      "$ref": "#/$defs/CanonicalFactContent"
+    },
+    "truth": {
+      "$ref": "#/$defs/TruthMeta"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/Lifecycle"
+    },
+    "retrieval": {
+      "$ref": "#/$defs/RetrievalMeta"
+    },
+    "governance": {
+      "$ref": "#/$defs/Governance"
+    },
+    "audit": {
+      "$ref": "#/$defs/Audit"
+    }
+  },
+  "required": [
+    "record_id",
+    "tenant_id",
+    "system_id",
+    "entity_scope",
+    "content",
+    "truth",
+    "provenance",
+    "lifecycle",
+    "audit"
+  ],
+  "title": "CanonicalFactRecord",
+  "type": "object"
+}

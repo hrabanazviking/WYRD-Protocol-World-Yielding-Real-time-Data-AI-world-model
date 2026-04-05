@@ -1,0 +1,37 @@
+- Finish all current phases of development.
+- Install the Claude Code plugin, Prima Scholar.
+- Create a plugin for Unreal Engine.
+- Create a plugin for Unity Engine.
+- Create a plugin for Godot Engine.
+- Create a plugin for Gamemaker Engine.
+- Create a plugin for CryEngine.
+- Create a plugin for Construct 3 Engine.
+- Create a plugin for Amazon Lumberyard.
+- Create a plugin for RPG Maker.
+- Create a plugin for Monogame Engine.
+- Create a plugin for Defold Engine.
+- Create a plugin for D&D Beyond.
+- Create a plugin for Roll20.
+- Create a plugin for Foundry VTT.
+- Create a plugin for Fantasy Grounds Unity.
+- Create a plugin for Owlbear Rodeo.
+- Create a plugin for Minecraft.
+- Create a plugin for Roblox.
+- Create a plugin for Norse Saga Engine.
+- Create a plugin for Voxta.
+- Create a plugin for SillyTavern.
+- Create a plugin for Kindroid.
+- Create a plugin for OpenSim (related to Second Life).
+- Create a plugin for OpenClaw.
+- Create a plugin for Hermes Agent.
+- Create a plugin for AgentZero.
+- Create a plugin for pygame (I forked it here https://github.com/hrabanazviking/pygame ).
+- Make complete technical references for the user about how to use this system, and how to integrate it into the various programs it can be used with. Make the information as user friendly and easy to understand as possible, with very technical information as well.
+- Make auto, robust, self healing, crash proof, install scripts for setting up WYRD with the various programs it is designed to work with.
+- Do lots of work to make all the codebase more robust, self healing, crash proof.
+- Do extensive bug hunting and bug fixing.
+- Trace the functions of all plugins and integrations to be sure they work really well with the programs they are designed to work with.
+- Create a single menu driven install script that is super automated and asks the user what they want to set WYRD for, and asks any need information of the user to get a extremely solid well working setup. Make sure it is robust, self healing, crash proof.
+
+
+  

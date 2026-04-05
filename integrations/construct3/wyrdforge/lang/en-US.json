@@ -1,0 +1,98 @@
+{
+  "languageTag": "en-US",
+  "fileDescription": "WyrdForge Construct 3 addon strings",
+  "text": {
+    "plugins": {
+      "wyrdforge": {
+        "name": "WyrdForge",
+        "description": "Connect your game to a WYRD Protocol server for AI world-state context.",
+        "help-url": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+        "properties": {
+          "host": {
+            "name": "Host",
+            "desc": "WyrdHTTPServer hostname (e.g. localhost)."
+          },
+          "port": {
+            "name": "Port",
+            "desc": "WyrdHTTPServer port (default 8765)."
+          },
+          "timeout-ms": {
+            "name": "Timeout (ms)",
+            "desc": "HTTP request timeout in milliseconds."
+          },
+          "enabled": {
+            "name": "Enabled",
+            "desc": "Toggle WyrdForge on or off."
+          }
+        },
+        "actions": {
+          "init": {
+            "list-name": "Initialize",
+            "display-text": "Initialize WyrdForge — host [b]{0}[/b] port [b]{1}[/b] timeout [b]{2}[/b] ms",
+            "description": "Configure the WyrdHTTPServer connection. Call once at game start.",
+            "params": {
+              "host": { "name": "Host", "desc": "WyrdHTTPServer hostname." },
+              "port": { "name": "Port", "desc": "WyrdHTTPServer port." },
+              "timeout-ms": { "name": "Timeout (ms)", "desc": "HTTP request timeout in milliseconds." }
+            }
+          },
+          "query-character": {
+            "list-name": "Query character context",
+            "display-text": "Query WYRD context for [b]{0}[/b] — [b]{1}[/b]",
+            "description": "Fetch world context for a character from WYRD. Triggers 'On query complete' or 'On query error' when done.",
+            "params": {
+              "persona-id": { "name": "Persona ID", "desc": "WYRD persona ID for the character (e.g. 'sigrid')." },
+              "query": { "name": "Query", "desc": "Optional query string. Leave empty for default world state context." }
+            }
+          },
+          "push-observation": {
+            "list-name": "Push observation",
+            "display-text": "Push observation — [b]{0}[/b]: [b]{1}[/b]",
+            "description": "Write a world event observation to WYRD memory.",
+            "params": {
+              "title": { "name": "Title", "desc": "Short title for the observation." },
+              "summary": { "name": "Summary", "desc": "Description of what happened." }
+            }
+          },
+          "push-fact": {
+            "list-name": "Push fact",
+            "display-text": "Push fact — [b]{0}[/b].[b]{1}[/b] = [b]{2}[/b]",
+            "description": "Write a world fact about a subject to WYRD.",
+            "params": {
+              "subject-id": { "name": "Subject ID", "desc": "Entity or character ID this fact is about." },
+              "key": { "name": "Key", "desc": "Fact key (e.g. 'location', 'role')." },
+              "value": { "name": "Value", "desc": "Fact value." }
+            }
+          }
+        },
+        "conditions": {
+          "on-query-complete": {
+            "list-name": "On query complete",
+            "display-text": "On WyrdForge query complete",
+            "description": "Triggered when a QueryCharacter action completes successfully."
+          },
+          "on-query-error": {
+            "list-name": "On query error",
+            "display-text": "On WyrdForge query error",
+            "description": "Triggered when a QueryCharacter, PushObservation, or PushFact action fails."
+          },
+          "is-ready": {
+            "list-name": "Is ready",
+            "display-text": "WyrdForge is ready",
+            "description": "True if WyrdForge has been initialized and is enabled."
+          }
+        },
+        "expressions": {
+          "last-response": {
+            "translated-name": "LastResponse",
+            "description": "The text response from the last successful QueryCharacter action."
+          },
+          "last-error": {
+            "translated-name": "LastError",
+            "description": "The error message from the last failed WyrdForge action."
+          }
+        }
+      }
+    }
+  }
+}

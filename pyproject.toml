@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wyrdforge"
+version = "1.0.0"
+description = "WYRD Protocol — World-Yielding Real-time Data AI World Model"
+readme = "README.md"
+license = { text = "CC BY 4.0" }
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "mypy>=1.9",
+]
+llm = [
+    "sentence-transformers",
+    "sqlalchemy>=2.0",
+]
+full = [
+    "sentence-transformers",
+    "sqlalchemy>=2.0",
+    "fastapi",
+    "uvicorn",
+    "click",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

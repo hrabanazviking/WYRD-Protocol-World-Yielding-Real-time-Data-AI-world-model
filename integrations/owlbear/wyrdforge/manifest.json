@@ -1,0 +1,14 @@
+{
+  "name": "WyrdForge",
+  "description": "Connects Owlbear Rodeo to a WYRD Protocol world server. Provides world-grounded context for AI-companion characters via the Action panel.",
+  "author": "RuneForgeAI",
+  "version": "1.0.0",
+  "icon": "https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/development/integrations/owlbear/wyrdforge/icon.svg",
+  "action": {
+    "title": "WyrdForge",
+    "icon": "https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/development/integrations/owlbear/wyrdforge/icon.svg",
+    "url": "https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/development/integrations/owlbear/wyrdforge/action.html",
+    "height": 480,
+    "width": 340
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "Type": "EPluginType::Native",
+  "Name": "WyrdForge",
+  "Version": "1.0.0",
+  "VersionName": "1.0.0",
+  "Description": "WYRD Protocol bridge for CryEngine — grounds NPC dialogue and entity state in a deterministic ECS world model via WyrdHTTPServer.",
+  "Author": "Volmarr Wyrd (RuneForgeAI)",
+  "AuthorURL": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+  "Category": "AI"
+}

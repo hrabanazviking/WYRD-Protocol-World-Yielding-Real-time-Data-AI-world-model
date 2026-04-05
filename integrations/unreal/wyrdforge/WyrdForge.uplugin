@@ -1,0 +1,24 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0",
+  "FriendlyName": "WyrdForge",
+  "Description": "WYRD Protocol bridge for Unreal Engine 5 — grounds NPC dialogue and entity state in a deterministic ECS world model via WyrdHTTPServer.",
+  "Category": "AI",
+  "CreatedBy": "Volmarr Wyrd (RuneForgeAI)",
+  "CreatedByURL": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+  "DocsURL": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "CanContainContent": false,
+  "IsBetaVersion": false,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "WyrdForge",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

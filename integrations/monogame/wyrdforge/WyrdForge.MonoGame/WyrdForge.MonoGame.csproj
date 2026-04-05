@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!--
+      No MonoGame.Framework reference here by design.
+      WyrdSystem.Update() takes a plain TimeSpan so it works with
+      both MonoGame and FNA without a framework dependency.
+      Call it with: _wyrd.Update(gameTime.ElapsedGameTime);
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\sdk\csharp\WyrdForge.Client\WyrdForge.Client.csproj" />
+  </ItemGroup>
+
+</Project>

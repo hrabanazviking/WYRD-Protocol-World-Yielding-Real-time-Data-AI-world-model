@@ -1,0 +1,16 @@
+# Core runtime dependencies
+pydantic>=2.0
+pyyaml>=6.0
+
+# Development
+pytest>=7.0
+pytest-asyncio>=0.23
+ruff>=0.4
+mypy>=1.9
+
+# Optional: LLM and persistence layer (Phase 2-4)
+# sentence-transformers
+# sqlalchemy>=2.0
+# fastapi
+# uvicorn
+# click

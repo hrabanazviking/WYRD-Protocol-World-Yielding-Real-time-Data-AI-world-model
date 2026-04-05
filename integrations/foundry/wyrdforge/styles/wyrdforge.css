@@ -1,0 +1,52 @@
+/* WyrdForge — WYRD Protocol for Foundry VTT */
+
+.wyrd-context-card {
+  border: 1px solid #7a5c3a;
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: #1a1a2e;
+  color: #c8b8a2;
+  font-size: 0.9em;
+  margin: 4px 0;
+}
+
+.wyrd-context-card h3.wyrd-persona {
+  margin: 0 0 6px 0;
+  font-size: 1em;
+  color: #d4a853;
+  border-bottom: 1px solid #7a5c3a;
+  padding-bottom: 4px;
+}
+
+.wyrd-context-body {
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 0.85em;
+}
+
+/* Actor sheet panel */
+.wyrd-actor-panel {
+  border-top: 1px solid #7a5c3a;
+  margin-top: 8px;
+  padding-top: 6px;
+}
+
+.wyrd-actor-context h4 {
+  color: #d4a853;
+  margin: 0 0 4px 0;
+  font-size: 0.85em;
+}
+
+.wyrd-actor-context p {
+  font-size: 0.8em;
+  color: #c8b8a2;
+  margin: 0;
+}
+
+.wyrd-loading,
+.wyrd-offline {
+  font-size: 0.8em;
+  color: #888;
+  font-style: italic;
+  margin: 0;
+}

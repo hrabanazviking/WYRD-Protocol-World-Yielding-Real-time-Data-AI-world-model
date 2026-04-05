@@ -1,0 +1,310 @@
+{
+  "$defs": {
+    "BondActiveModes": {
+      "additionalProperties": false,
+      "properties": {
+        "relational_mode": {
+          "default": "builder",
+          "title": "Relational Mode",
+          "type": "string"
+        },
+        "emotional_weather": {
+          "default": "calm",
+          "title": "Emotional Weather",
+          "type": "string"
+        }
+      },
+      "title": "BondActiveModes",
+      "type": "object"
+    },
+    "BondChronology": {
+      "additionalProperties": false,
+      "properties": {
+        "formed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Formed At"
+        },
+        "last_major_shift_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Major Shift At"
+        },
+        "last_contact_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Contact At"
+        }
+      },
+      "title": "BondChronology",
+      "type": "object"
+    },
+    "BondConstraints": {
+      "additionalProperties": false,
+      "properties": {
+        "exclusivity_mode": {
+          "default": "none",
+          "title": "Exclusivity Mode",
+          "type": "string"
+        },
+        "intimacy_ceiling": {
+          "default": "medium",
+          "title": "Intimacy Ceiling",
+          "type": "string"
+        },
+        "boundary_profile_id": {
+          "default": "default",
+          "title": "Boundary Profile Id",
+          "type": "string"
+        }
+      },
+      "title": "BondConstraints",
+      "type": "object"
+    },
+    "BondDomain": {
+      "enum": [
+        "companion",
+        "romance",
+        "friendship",
+        "mentor",
+        "builder",
+        "ritual",
+        "party_member",
+        "deity_devotee"
+      ],
+      "title": "BondDomain",
+      "type": "string"
+    },
+    "BondEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "supporting_record_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supporting Record Ids",
+          "type": "array"
+        },
+        "contradiction_record_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradiction Record Ids",
+          "type": "array"
+        }
+      },
+      "title": "BondEvidence",
+      "type": "object"
+    },
+    "BondGovernance": {
+      "additionalProperties": false,
+      "properties": {
+        "review_required_for_large_shift": {
+          "default": true,
+          "title": "Review Required For Large Shift",
+          "type": "boolean"
+        },
+        "synthetic_claim_guard": {
+          "default": true,
+          "title": "Synthetic Claim Guard",
+          "type": "boolean"
+        }
+      },
+      "title": "BondGovernance",
+      "type": "object"
+    },
+    "BondScars": {
+      "additionalProperties": false,
+      "properties": {
+        "repair_debt": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Repair Debt",
+          "type": "number"
+        },
+        "unresolved_hurts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Hurts",
+          "type": "array"
+        },
+        "vow_strain": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Vow Strain",
+          "type": "number"
+        }
+      },
+      "title": "BondScars",
+      "type": "object"
+    },
+    "BondStatus": {
+      "enum": [
+        "forming",
+        "active",
+        "strained",
+        "repairing",
+        "dormant",
+        "broken",
+        "transfigured"
+      ],
+      "title": "BondStatus",
+      "type": "string"
+    },
+    "BondVector": {
+      "additionalProperties": false,
+      "properties": {
+        "trust": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Trust",
+          "type": "number"
+        },
+        "warmth": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Warmth",
+          "type": "number"
+        },
+        "familiarity": {
+          "default": 0.1,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Familiarity",
+          "type": "number"
+        },
+        "devotion": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Devotion",
+          "type": "number"
+        },
+        "attraction_affinity": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Attraction Affinity",
+          "type": "number"
+        },
+        "safety": {
+          "default": 0.8,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Safety",
+          "type": "number"
+        },
+        "sacred_resonance": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Sacred Resonance",
+          "type": "number"
+        },
+        "playfulness": {
+          "default": 0.2,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Playfulness",
+          "type": "number"
+        },
+        "vulnerability": {
+          "default": 0.1,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Vulnerability",
+          "type": "number"
+        },
+        "initiative_balance": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Initiative Balance",
+          "type": "number"
+        }
+      },
+      "title": "BondVector",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "bond_id": {
+      "title": "Bond Id",
+      "type": "string"
+    },
+    "entity_a": {
+      "title": "Entity A",
+      "type": "string"
+    },
+    "entity_b": {
+      "title": "Entity B",
+      "type": "string"
+    },
+    "domain": {
+      "$ref": "#/$defs/BondDomain"
+    },
+    "status": {
+      "$ref": "#/$defs/BondStatus",
+      "default": "forming"
+    },
+    "vector": {
+      "$ref": "#/$defs/BondVector"
+    },
+    "constraints": {
+      "$ref": "#/$defs/BondConstraints"
+    },
+    "scars": {
+      "$ref": "#/$defs/BondScars"
+    },
+    "active_modes": {
+      "$ref": "#/$defs/BondActiveModes"
+    },
+    "chronology": {
+      "$ref": "#/$defs/BondChronology"
+    },
+    "evidence": {
+      "$ref": "#/$defs/BondEvidence"
+    },
+    "governance": {
+      "$ref": "#/$defs/BondGovernance"
+    }
+  },
+  "required": [
+    "bond_id",
+    "entity_a",
+    "entity_b",
+    "domain"
+  ],
+  "title": "BondEdge",
+  "type": "object"
+}

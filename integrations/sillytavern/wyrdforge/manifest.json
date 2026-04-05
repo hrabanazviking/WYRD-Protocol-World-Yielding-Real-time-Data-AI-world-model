@@ -1,0 +1,11 @@
+{
+  "display_name": "WyrdForge World Context",
+  "version": "1.0.0",
+  "author": "RuneForgeAI",
+  "homePage": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+  "js": "index.js",
+  "css": "wyrdforge.css",
+  "description": "Injects WYRD Protocol world context (ECS world state, character facts, bond data) into SillyTavern prompts before each generation.",
+  "requires": [],
+  "optional": []
+}

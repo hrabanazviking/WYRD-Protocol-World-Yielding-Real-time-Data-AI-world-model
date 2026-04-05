@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WyrdForge</title>
+  <style>
+    body { margin: 0; background: #1a1a2e; color: #c8b8a2; font-family: sans-serif; font-size: 14px; }
+    .wyrd-panel { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    label { display: flex; flex-direction: column; gap: 2px; font-size: 0.85em; color: #aaa; }
+    input { background: #16213e; border: 1px solid #7a5c3a; border-radius: 3px; color: #c8b8a2; padding: 4px 6px; font-size: 0.9em; }
+    input:focus { outline: 1px solid #d4a853; }
+    button { background: #7a5c3a; border: none; border-radius: 3px; color: #fff; padding: 6px 10px; cursor: pointer; font-size: 0.9em; }
+    button:hover:not(:disabled) { background: #d4a853; color: #1a1a2e; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .wyrd-error { color: #e07070; font-size: 0.85em; margin: 0; }
+    pre.wyrd-output { white-space: pre-wrap; font-size: 0.8em; background: #16213e; border: 1px solid #7a5c3a; border-radius: 3px; padding: 6px; margin: 0; max-height: 260px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <div class="wyrd-panel"><p>Loading WyrdForge…</p></div>
+  <script type="module" src="wyrdforge.js"></script>
+</body>
+</html>

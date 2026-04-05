@@ -1,0 +1,20 @@
+{
+    "Type": "FileVersion",
+    "Version": 1,
+    "Uuid": "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+    "Name": "WyrdForge",
+    "DisplayName": "WyrdForge",
+    "Summary": "WYRD Protocol bridge for O3DE — grounds NPC dialogue and entity state in a deterministic ECS world model via WyrdHTTPServer.",
+    "Tags": ["AI", "NPC", "WorldModel"],
+    "IconPath": "preview.png",
+    "Requirements": "",
+    "Author": "Volmarr Wyrd (RuneForgeAI)",
+    "AuthorURL": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+    "Version": "1.0.0",
+    "Modules": [
+        {
+            "Type": "GameModule",
+            "Name": "WyrdForge"
+        }
+    ]
+}

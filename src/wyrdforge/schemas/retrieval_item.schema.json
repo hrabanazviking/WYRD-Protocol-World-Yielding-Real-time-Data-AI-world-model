@@ -1,0 +1,63 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "item_id": {
+      "title": "Item Id",
+      "type": "string"
+    },
+    "item_type": {
+      "title": "Item Type",
+      "type": "string"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "support_class": {
+      "default": "supported",
+      "title": "Support Class",
+      "type": "string"
+    },
+    "confidence": {
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "source_ref": {
+      "title": "Source Ref",
+      "type": "string"
+    },
+    "lexical_terms": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Lexical Terms",
+      "type": "array"
+    },
+    "facets": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Facets",
+      "type": "object"
+    },
+    "token_cost": {
+      "default": 80,
+      "title": "Token Cost",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "item_id",
+    "item_type",
+    "text",
+    "source_ref"
+  ],
+  "title": "RetrievalItem",
+  "type": "object"
+}

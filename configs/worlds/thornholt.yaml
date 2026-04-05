@@ -1,0 +1,65 @@
+world_id: thornholt
+world_name: "Thornholt Mead Hall"
+
+zones:
+  - id: midgard
+    name: Midgard
+    description: "The world of mortals, where Vikings forge their fate in iron and blood"
+    regions:
+      - id: fjordlands
+        name: "The Fjordlands"
+        description: "Rocky fjords and cold northern seas — home to the Thornholt clan"
+        locations:
+          - id: thornholt_hall
+            name: "Thornholt Mead Hall"
+            description: "A great timber longhouse, smoke-stained and battle-scarred, built where three rivers meet"
+            sublocations:
+              - id: great_fire_pit
+                name: "The Great Fire Pit"
+                description: "The central hearth where stories are told, oaths sworn, and disputes settled under the smoke-hole"
+              - id: high_seat
+                name: "The High Seat"
+                description: "The jarl's carved oak throne, flanked by wolf-skull posts and raven banners"
+              - id: mead_benches
+                name: "The Mead Benches"
+                description: "Long oak benches worn smooth by decades of warriors eating, drinking, and brawling"
+              - id: sleeping_alcoves
+                name: "The Sleeping Alcoves"
+                description: "Curtained alcoves lined with furs and bedrolls — where bonds and secrets are kept"
+              - id: weapons_rack
+                name: "The Weapons Rack"
+                description: "Iron hooks along the eastern wall holding shields, spears, and unsheathed swords"
+          - id: thornholt_docks
+            name: "Thornholt Docks"
+            description: "Weathered wooden docks where the salt wind never stops and longships creak against their moorings"
+            sublocations:
+              - id: main_dock
+                name: "Main Dock"
+                description: "The broad central dock where cargo and travellers arrive"
+              - id: longship_berths
+                name: "Longship Berths"
+                description: "Three narrow berths where the warships rest, hulls black with pitch"
+          - id: thornholt_forge
+            name: "Thornholt Forge"
+            description: "The iron forge behind the hall — hot, loud, and always burning"
+            sublocations:
+              - id: forge_hearth
+                name: "The Forge Hearth"
+                description: "The great bellows-fed fire where iron is shaped to will"
+              - id: smiths_bench
+                name: "The Smith's Bench"
+                description: "Cluttered oak bench covered in tools, unfinished blades, and rune-marked iron scraps"
+      - id: dark_forest_edge
+        name: "The Dark Forest Edge"
+        description: "Where Thornholt's cleared land meets the ancient forest — a boundary the wise respect"
+        locations:
+          - id: forest_clearing
+            name: "The Forest Clearing"
+            description: "A circle of old stones at the tree-line — used for offerings and seidr work"
+            sublocations:
+              - id: offering_stone
+                name: "The Offering Stone"
+                description: "A flat granite slab worn smooth by centuries of offerings to the gods"
+              - id: seidr_circle
+                name: "The Seidr Circle"
+                description: "Nine ash-wood posts carved with runes, marking the völva's working space"
