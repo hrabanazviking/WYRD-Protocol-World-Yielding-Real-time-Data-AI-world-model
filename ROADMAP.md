@@ -307,7 +307,7 @@ Phase 8 (SDK layer)
 | 13B — Unreal Engine | complete | integrations/unreal/wyrdforge/ |
 | 13C — CryEngine | complete | integrations/cryengine/wyrdforge/ |
 | 13D — O3DE/Lumberyard | complete | integrations/o3de/wyrdforge/ |
-| 14A — Prima Scholar | pending | |
-| 14B — WYRD TUI Editor | pending | |
-| 14C — WYRD Cloud Relay | pending | |
-| 14D — Docs site | pending | |
+| 14A — Prima Scholar | complete | CLAUDE.md + tools/prima_scholar/ |
+| 14B — WYRD TUI Editor | complete | tools/wyrd_tui.py |
+| 14C — WYRD Cloud Relay | complete | tools/wyrd_cloud_relay/ |
+| 14D — Docs site | complete | docs/ + mkdocs.yml |

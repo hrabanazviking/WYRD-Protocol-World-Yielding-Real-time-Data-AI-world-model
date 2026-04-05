@@ -1,0 +1,94 @@
+site_name: WYRD Protocol
+site_description: World-Yielding Real-time Data — AI World Model documentation
+site_author: Volmarr Wyrd (RuneForgeAI)
+site_url: https://hrabanazviking.github.io/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/
+
+repo_name: hrabanazviking/WYRD-Protocol
+repo_url: https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: deep purple
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default
+      primary: deep purple
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quickstart: guides/quickstart.md
+    - Installation: guides/installation.md
+    - First World: guides/first-world.md
+  - Core Concepts:
+    - Architecture: guides/architecture.md
+    - ECS & Yggdrasil: guides/ecs-yggdrasil.md
+    - Passive Oracle: guides/passive-oracle.md
+    - Memory System: guides/memory-system.md
+    - Runic Metaphysics: guides/runic-metaphysics.md
+  - API Reference:
+    - HTTP API: api/http-api.md
+    - Python SDK: api/python-sdk.md
+    - JavaScript SDK: api/js-sdk.md
+    - C# SDK: api/csharp-sdk.md
+  - Integrations:
+    - Overview: integrations/overview.md
+    - Unity: integrations/unity.md
+    - Unreal Engine: integrations/unreal.md
+    - Godot 4: integrations/godot.md
+    - Foundry VTT: integrations/foundry.md
+    - SillyTavern: integrations/sillytavern.md
+    - Minecraft: integrations/minecraft.md
+    - Roblox: integrations/roblox.md
+    - OpenSim / Second Life: integrations/opensim.md
+  - Tools:
+    - World Editor TUI: tools/tui.md
+    - Cloud Relay: tools/cloud-relay.md
+    - Prima Scholar: tools/prima-scholar.md
+  - Example Worlds:
+    - Thornholt: examples/thornholt.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/hrabanazviking
+  version:
+    provider: mike
+
+copyright: "CC BY 4.0 RuneForgeAI — Volmarr Wyrd"
