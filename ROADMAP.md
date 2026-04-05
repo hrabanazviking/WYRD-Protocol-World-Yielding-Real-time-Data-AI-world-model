@@ -301,7 +301,7 @@ Phase 8 (SDK layer)
 | 11E — MonoGame | complete | integrations/monogame/wyrdforge/ |
 | 11F — Defold | complete | integrations/defold/wyrdforge/ |
 | 12A — OpenSim/SL | complete | integrations/opensim/wyrdforge/ |
-| 12B — Minecraft | pending | |
+| 12B — Minecraft | complete | integrations/minecraft/wyrdforge/ |
 | 12C — Roblox | pending | |
 | 13A — Unity | pending | |
 | 13B — Unreal Engine | pending | |

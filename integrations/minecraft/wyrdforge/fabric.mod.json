@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "wyrdforge",
+  "version": "${version}",
+  "name": "WyrdForge",
+  "description": "WYRD Protocol bridge for Minecraft — grounds NPC dialogue and entity state in deterministic ECS world model.",
+  "authors": [
+    "Volmarr Wyrd (RuneForgeAI)"
+  ],
+  "contact": {
+    "homepage": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+    "sources": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model"
+  },
+  "license": "CC-BY-4.0",
+  "icon": "assets/wyrdforge/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "com.wyrdforge.WyrdForgeMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.5",
+    "minecraft": "~1.21",
+    "java": ">=17",
+    "fabric-api": "*"
+  },
+  "suggests": {}
+}
