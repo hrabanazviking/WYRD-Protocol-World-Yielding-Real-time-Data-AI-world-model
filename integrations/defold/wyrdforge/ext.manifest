@@ -1,0 +1,26 @@
+name: "WyrdForge"
+platforms:
+    x86_64-osx:
+        context:
+            libs: ["WyrdForge"]
+            frameworks: []
+    arm64-osx:
+        context:
+            libs: ["WyrdForge"]
+            frameworks: []
+    x86_64-linux:
+        context:
+            libs: ["WyrdForge"]
+    x86_64-win32:
+        context:
+            libs: ["WyrdForge"]
+    arm64-ios:
+        context:
+            libs: ["WyrdForge"]
+            frameworks: ["Foundation"]
+    armv7-android:
+        context:
+            libs: ["WyrdForge"]
+    js-web:
+        context:
+            libs: ["WyrdForge"]

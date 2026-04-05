@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-05
 **Branch:** development
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 
 ## Scope
 
@@ -42,12 +42,12 @@ integrations/defold/wyrdforge/
 
 - [x] Write TASK file
 - [x] Commit + push task file
-- [ ] Build ext.manifest
-- [ ] Build src/wyrdforge.cpp
-- [ ] Build lua/wyrdforge.lua
-- [ ] Build api/wyrdforge.script_api
-- [ ] Build tests/test_wyrdforge.py
-- [ ] Run pytest
-- [ ] Update ROADMAP.md
-- [ ] Commit + push
-- [ ] Update memory
+- [x] Build ext.manifest
+- [x] Build src/wyrdforge.cpp
+- [x] Build lua/wyrdforge.lua
+- [x] Build api/wyrdforge.script_api
+- [x] Build tests/test_wyrdforge.py
+- [x] Run pytest
+- [x] Update ROADMAP.md
+- [x] Commit + push
+- [x] Update memory

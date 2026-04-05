@@ -1,0 +1,83 @@
+- name: wyrdforge
+  type: table
+  desc: >
+    WyrdForge native extension module. Provides pure-function utilities for
+    building WYRD Protocol request bodies. Use the wyrdforge Lua module
+    (lua/wyrdforge.lua) for the full async HTTP API.
+  members:
+
+  - name: normalize_persona_id
+    type: function
+    desc: >
+      Normalize a display name to a valid WYRD persona_id.
+      Lowercases, replaces non-alphanumeric characters with underscores,
+      collapses consecutive underscores, strips leading/trailing underscores,
+      and truncates to 64 characters.
+    parameters:
+    - name: name
+      type: string
+      desc: Display name to normalize (e.g. "Sigrid Stormborn").
+    returns:
+    - name: persona_id
+      type: string
+      desc: Normalized persona ID (e.g. "sigrid_stormborn").
+    examples:
+    - desc: Normalize an NPC name before querying WYRD.
+      code: |
+        local id = wyrdforge.normalize_persona_id("Sigrid Stormborn")
+        -- id == "sigrid_stormborn"
+        wyrd.query(id, "What do the runes say?", my_callback)
+
+  - name: build_query_body
+    type: function
+    desc: >
+      Build a JSON string suitable for a POST to /query on WyrdHTTPServer.
+      Sets use_turn_loop to false for context-only retrieval.
+    parameters:
+    - name: persona_id
+      type: string
+      desc: WYRD persona ID for the character.
+    - name: user_input
+      type: string
+      desc: >
+        Player message or query text. Pass an empty string to use the
+        default "What is the current world state?" query.
+    returns:
+    - name: json_body
+      type: string
+      desc: JSON-encoded request body string.
+    examples:
+    - desc: Build and inspect a query body.
+      code: |
+        local body = wyrdforge.build_query_body("sigrid", "What is happening?")
+        print(body)
+        -- {"persona_id":"sigrid","user_input":"What is happening?","use_turn_loop":false}
+
+  - name: build_event_body
+    type: function
+    desc: >
+      Build a JSON string suitable for a POST to /event on WyrdHTTPServer.
+      Wraps a pre-encoded payload JSON object in the WYRD event envelope.
+    parameters:
+    - name: event_type
+      type: string
+      desc: '"observation" or "fact".'
+    - name: payload_json
+      type: string
+      desc: >
+        Pre-encoded JSON object string for the event payload.
+        Use json.encode() to produce this from a Lua table.
+    returns:
+    - name: json_body
+      type: string
+      desc: JSON-encoded event body string.
+    examples:
+    - desc: Build an observation event body.
+      code: |
+        local payload = json.encode({title = "Storm", summary = "Rain fell heavily."})
+        local body = wyrdforge.build_event_body("observation", payload)
+        -- {"event_type":"observation","payload":{"title":"Storm","summary":"Rain fell heavily."}}
+    - desc: Build a fact event body.
+      code: |
+        local payload = json.encode({subject_id = "sigrid", key = "location", value = "mead_hall"})
+        local body = wyrdforge.build_event_body("fact", payload)

@@ -299,7 +299,7 @@ Phase 8 (SDK layer)
 | 11C — GameMaker | complete | integrations/gamemaker/wyrdforge/ |
 | 11D — Construct 3 | complete | integrations/construct3/wyrdforge/ |
 | 11E — MonoGame | complete | integrations/monogame/wyrdforge/ |
-| 11F — Defold | pending | |
+| 11F — Defold | complete | integrations/defold/wyrdforge/ |
 | 12A — OpenSim/SL | pending | |
 | 12B — Minecraft | pending | |
 | 12C — Roblox | pending | |
