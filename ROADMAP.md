@@ -302,7 +302,7 @@ Phase 8 (SDK layer)
 | 11F — Defold | complete | integrations/defold/wyrdforge/ |
 | 12A — OpenSim/SL | complete | integrations/opensim/wyrdforge/ |
 | 12B — Minecraft | complete | integrations/minecraft/wyrdforge/ |
-| 12C — Roblox | pending | |
+| 12C — Roblox | complete | integrations/roblox/wyrdforge/ |
 | 13A — Unity | pending | |
 | 13B — Unreal Engine | pending | |
 | 13C — CryEngine | pending | |
