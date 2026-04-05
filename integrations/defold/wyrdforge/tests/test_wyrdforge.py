@@ -37,13 +37,10 @@ def normalize_persona_id(name: str) -> str:
     """Normalize a display name to a WYRD persona_id (snake_case, max 64 chars)."""
     out = []
     last_under = False
-    for c in name:
-        if c.isalnum():
-            out.append(c.lower())
+    for c in name.lower():
+        if c.isascii() and c.isalnum():
+            out.append(c)
             last_under = False
-        elif c == '_':
-            out.append('_')
-            last_under = True
         elif not last_under:
             out.append('_')
             last_under = True

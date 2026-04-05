@@ -36,8 +36,8 @@ def normalize_persona_id(name: str) -> str:
     if not name: return ""
     out, last_under = [], False
     for c in name.lower():
-        if c.isalnum() or c == '_':
-            out.append(c); last_under = (c == '_')
+        if c.isascii() and c.isalnum():
+            out.append(c); last_under = False
         elif not last_under:
             out.append('_'); last_under = True
     result = ''.join(out).strip('_')

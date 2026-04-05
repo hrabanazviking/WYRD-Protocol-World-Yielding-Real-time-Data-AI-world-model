@@ -508,8 +508,8 @@ Phase 8 (SDK layer)
 | 18B — Bridge utilities | complete | src/wyrdforge/hardening/ — backoff.py, normalization.py, pool.py |
 | 18C — Memory/persistence hardening | complete | src/wyrdforge/persistence/memory_store.py — busy_timeout, auto_vacuum, integrity_check |
 | 18D — Config/startup hardening | complete | src/wyrdforge/hardening/config_validator.py — validate_world_config, coerce_env — 85 Python tests |
-| 19A — HTTP API contract tests | pending | tests/ |
-| 19B — Bridge smoke tests | pending | tests/ |
-| 19C — persona_id normalization audit | pending | tests/ |
-| 19D — Load and stability testing | pending | tests/ |
-| 19E — Documentation accuracy audit | pending | docs/ |
+| 19A — HTTP API contract tests | complete | tests/test_phase19_api_contracts.py — 27 tests; WyrdHTTPServer ThreadingMixIn fix |
+| 19B — Bridge smoke tests | complete | tests/test_phase19_bridge_smoke.py — 72 tests; 7 bridge groups |
+| 19C — persona_id normalization audit | complete | tests/test_phase19_normalization.py — 250 tests; 4 engine mirror bugs fixed |
+| 19D — Load and stability testing | complete | tests/test_phase19_load.py — 8 tests; 50 concurrent, p99 < 2s |
+| 19E — Documentation accuracy audit | complete | tests/test_phase19_docs.py — 73 tests; all key symbols + CLAUDE.md paths verified |

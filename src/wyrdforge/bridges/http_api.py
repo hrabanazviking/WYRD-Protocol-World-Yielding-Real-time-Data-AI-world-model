@@ -29,6 +29,12 @@ import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
+
+
+class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """HTTPServer with per-request daemon threads for concurrent request handling."""
+    daemon_threads = True
 from typing import Any, Optional
 
 from wyrdforge.bridges.python_rpg import PythonRPGBridge
@@ -233,7 +239,7 @@ class WyrdHTTPServer:
         Call :meth:`shutdown` from another thread to stop gracefully.
         """
         self._stopped.clear()
-        self._server = HTTPServer((self._host, self._port), self._handler_cls)
+        self._server = _ThreadingHTTPServer((self._host, self._port), self._handler_cls)
         self._server.serve_forever()
 
     def start_background(self) -> threading.Thread:
@@ -247,7 +253,7 @@ class WyrdHTTPServer:
             The running server Thread (daemon=True, joins on process exit).
         """
         self._stopped.clear()
-        self._server = HTTPServer((self._host, self._port), self._handler_cls)
+        self._server = _ThreadingHTTPServer((self._host, self._port), self._handler_cls)
         thread = threading.Thread(target=self._serve_loop, name="wyrd-server", daemon=True)
         thread.start()
         if self._watchdog:
@@ -294,7 +300,7 @@ class WyrdHTTPServer:
                 if getattr(self._server, "_BaseServer__shutdown_request", False):
                     if not self._stopped.is_set():
                         logger.warning("WyrdHTTPServer watchdog: server stopped unexpectedly — restarting")
-                        self._server = HTTPServer((self._host, self._port), self._handler_cls)
+                        self._server = _ThreadingHTTPServer((self._host, self._port), self._handler_cls)
                         t = threading.Thread(target=self._serve_loop, name="wyrd-server-restart", daemon=True)
                         t.start()
             except Exception:

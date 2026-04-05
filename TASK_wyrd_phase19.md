@@ -2,7 +2,7 @@
 
 **Date started:** 2026-04-05
 **Branch:** development
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 
 ## Scope
 
@@ -26,12 +26,12 @@ tests/
 
 | Sub-phase | Deliverable | Status |
 |---|---|---|
-| 19A | HTTP API contract tests — live server, all endpoints, edge cases | pending |
-| 19B | Bridge smoke tests — request shape, persona_id, error handling | pending |
-| 19C | Normalization audit — shared vectors, all Python impls | pending |
-| 19D | Mini load test — 50 concurrent, p99 < 2s | pending |
-| 19E | Docs accuracy audit — Python code block syntax, key symbols importable | pending |
-| — | ROADMAP.md update, commit, push, memory update | pending |
+| 19A | HTTP API contract tests — live server, all endpoints, edge cases | complete — 27 tests |
+| 19B | Bridge smoke tests — request shape, persona_id, error handling | complete — 72 tests |
+| 19C | Normalization audit — shared vectors, all Python impls | complete — 250 tests |
+| 19D | Mini load test — 50 concurrent, p99 < 2s | complete — 8 tests |
+| 19E | Docs accuracy audit — Python code block syntax, key symbols importable | complete — 73 tests |
+| — | ROADMAP.md update, commit, push, memory update | complete |
 
 ## Next Steps (if session breaks)
 

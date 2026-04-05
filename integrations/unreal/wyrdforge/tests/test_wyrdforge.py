@@ -33,12 +33,11 @@ def escape_json(s) -> str:
 
 def normalize_persona_id(name: str) -> str:
     if not name: return ""
-    result = name.lower()
     out, last_under = [], False
-    for c in result:
-        if c.isalnum() or c == '_':
+    for c in name.lower():
+        if c.isascii() and c.isalnum():
             out.append(c)
-            last_under = (c == '_')
+            last_under = False
         elif not last_under:
             out.append('_')
             last_under = True
