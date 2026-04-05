@@ -504,10 +504,10 @@ Phase 8 (SDK layer)
 | 17A — Master installer | complete | install/wyrd_setup.py — WyrdSetup, InstallLog, menu |
 | 17B — Self-healing setup | complete | install/wyrd_setup.py — DiagnosticsEngine, retry loop |
 | 17C — Uninstall & update | complete | install/wyrd_setup.py — --check/--uninstall/--update/--list — 77 Python tests |
-| 18A — WyrdHTTPServer hardening | pending | src/wyrdforge/ |
-| 18B — Bridge layer hardening | pending | integrations/ |
-| 18C — Memory/persistence hardening | pending | src/wyrdforge/persistence/ |
-| 18D — Config/startup hardening | pending | src/wyrdforge/ |
+| 18A — WyrdHTTPServer hardening | complete | src/wyrdforge/bridges/http_api.py — max_request_bytes, 413, watchdog thread |
+| 18B — Bridge utilities | complete | src/wyrdforge/hardening/ — backoff.py, normalization.py, pool.py |
+| 18C — Memory/persistence hardening | complete | src/wyrdforge/persistence/memory_store.py — busy_timeout, auto_vacuum, integrity_check |
+| 18D — Config/startup hardening | complete | src/wyrdforge/hardening/config_validator.py — validate_world_config, coerce_env — 85 Python tests |
 | 19A — HTTP API contract tests | pending | tests/ |
 | 19B — Bridge smoke tests | pending | tests/ |
 | 19C — persona_id normalization audit | pending | tests/ |

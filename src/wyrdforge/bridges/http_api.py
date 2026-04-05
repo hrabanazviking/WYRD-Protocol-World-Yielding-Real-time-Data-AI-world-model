@@ -25,11 +25,19 @@ Typical usage::
 from __future__ import annotations
 
 import json
+import logging
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any
+from typing import Any, Optional
 
 from wyrdforge.bridges.python_rpg import PythonRPGBridge
+
+logger = logging.getLogger(__name__)
+
+# Default maximum request body size (1 MiB). Requests larger than this receive
+# 413 Content Too Large without reading the full body — prevents memory exhaustion.
+DEFAULT_MAX_REQUEST_BYTES: int = 1 * 1024 * 1024  # 1 MiB
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +48,7 @@ class _WyrdHandler(BaseHTTPRequestHandler):
     """Internal request handler.  Do not instantiate directly."""
 
     bridge: PythonRPGBridge  # injected by WyrdHTTPServer via class patching
+    max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES  # injected at class creation
 
     # ------------------------------------------------------------------
     # Routing
@@ -136,13 +145,25 @@ class _WyrdHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def _read_json(self) -> dict[str, Any] | None:
-        length = int(self.headers.get("Content-Length", 0))
+        length_str = self.headers.get("Content-Length", "0")
+        try:
+            length = int(length_str)
+        except ValueError:
+            self._send_error(400, "Invalid Content-Length header")
+            return None
+        if length > self.max_request_bytes:
+            self._send_error(413, f"Request body too large (max {self.max_request_bytes} bytes)")
+            return None
         raw = self.rfile.read(length)
         try:
-            return json.loads(raw.decode("utf-8"))
+            data = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             self._send_error(400, f"Invalid JSON: {exc}")
             return None
+        if not isinstance(data, dict):
+            self._send_error(400, "Request body must be a JSON object")
+            return None
+        return data
 
     def _send_json(self, data: Any, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -167,9 +188,15 @@ class WyrdHTTPServer:
     """Minimal HTTP server wrapping a PythonRPGBridge.
 
     Args:
-        bridge: The PythonRPGBridge instance to serve.
-        host:   Bind address (default ``"localhost"``).
-        port:   Bind port (default ``8765``).
+        bridge:            The PythonRPGBridge instance to serve.
+        host:              Bind address (default ``"localhost"``).
+        port:              Bind port (default ``8765``).
+        max_request_bytes: Maximum accepted request body size in bytes.
+                           Requests larger than this receive ``413``.
+                           Default: 1 MiB.
+        watchdog:          If True, a watchdog thread monitors the server and
+                           restarts it after an unhandled crash (default False).
+        watchdog_interval: Seconds between watchdog health checks (default 5).
     """
 
     def __init__(
@@ -178,18 +205,25 @@ class WyrdHTTPServer:
         *,
         host: str = "localhost",
         port: int = 8765,
+        max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
+        watchdog: bool = False,
+        watchdog_interval: float = 5.0,
     ) -> None:
         self._bridge = bridge
         self._host = host
         self._port = port
-        self._server: HTTPServer | None = None
+        self._max_request_bytes = max_request_bytes
+        self._watchdog = watchdog
+        self._watchdog_interval = watchdog_interval
+        self._server: Optional[HTTPServer] = None
+        self._stopped = threading.Event()
 
-        # Inject bridge reference into handler class via subclass so that
+        # Inject bridge + config into handler class via subclass so that
         # multiple server instances each get their own handler class.
         handler_cls = type(
             "_BoundWyrdHandler",
             (_WyrdHandler,),
-            {"bridge": bridge},
+            {"bridge": bridge, "max_request_bytes": max_request_bytes},
         )
         self._handler_cls = handler_cls
 
@@ -198,22 +232,32 @@ class WyrdHTTPServer:
 
         Call :meth:`shutdown` from another thread to stop gracefully.
         """
+        self._stopped.clear()
         self._server = HTTPServer((self._host, self._port), self._handler_cls)
         self._server.serve_forever()
 
     def start_background(self) -> threading.Thread:
         """Start the server in a background daemon thread.
 
+        When *watchdog=True* was passed to the constructor, an additional
+        watchdog daemon thread monitors the server and restarts it if the
+        serve loop exits unexpectedly.
+
         Returns:
-            The running Thread (daemon=True, joins on process exit).
+            The running server Thread (daemon=True, joins on process exit).
         """
+        self._stopped.clear()
         self._server = HTTPServer((self._host, self._port), self._handler_cls)
-        thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        thread = threading.Thread(target=self._serve_loop, name="wyrd-server", daemon=True)
         thread.start()
+        if self._watchdog:
+            wd = threading.Thread(target=self._watchdog_loop, name="wyrd-watchdog", daemon=True)
+            wd.start()
         return thread
 
     def shutdown(self) -> None:
         """Stop the server if running."""
+        self._stopped.set()
         if self._server is not None:
             self._server.shutdown()
             self._server = None
@@ -222,3 +266,36 @@ class WyrdHTTPServer:
     def address(self) -> tuple[str, int]:
         """(host, port) this server is bound to."""
         return (self._host, self._port)
+
+    @property
+    def max_request_bytes(self) -> int:
+        """Maximum accepted request body size in bytes."""
+        return self._max_request_bytes
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _serve_loop(self) -> None:
+        """Target for the server background thread."""
+        try:
+            self._server.serve_forever()
+        except Exception:
+            logger.exception("WyrdHTTPServer: serve_forever exited with exception")
+
+    def _watchdog_loop(self) -> None:
+        """Daemon thread that restarts the server if it crashes."""
+        while not self._stopped.wait(timeout=self._watchdog_interval):
+            if self._server is None:
+                continue
+            # Check if the serve_forever select loop is still running by
+            # inspecting the internal _BaseServer__shutdown_request flag.
+            try:
+                if getattr(self._server, "_BaseServer__shutdown_request", False):
+                    if not self._stopped.is_set():
+                        logger.warning("WyrdHTTPServer watchdog: server stopped unexpectedly — restarting")
+                        self._server = HTTPServer((self._host, self._port), self._handler_cls)
+                        t = threading.Thread(target=self._serve_loop, name="wyrd-server-restart", daemon=True)
+                        t.start()
+            except Exception:
+                logger.exception("WyrdHTTPServer watchdog: error during health check")

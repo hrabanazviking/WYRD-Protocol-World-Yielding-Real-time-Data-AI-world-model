@@ -105,11 +105,34 @@ class PersistentMemoryStore:
             conn.executescript(_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self._db_path), timeout=10.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")      # wait up to 5 s on locked DB
+        conn.execute("PRAGMA auto_vacuum=INCREMENTAL") # reclaim space incrementally
         return conn
+
+    def integrity_check(self) -> bool:
+        """Run SQLite's integrity_check pragma and return True if the DB is healthy.
+
+        Logs a warning for every error found.  Returns False if any errors are
+        detected; True if the result is ``"ok"``.
+        """
+        with self._connect() as conn:
+            rows = conn.execute("PRAGMA integrity_check(10)").fetchall()
+        results = [row[0] for row in rows]
+        if results == ["ok"]:
+            return True
+        for msg in results:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("MemoryStore integrity_check: %s", msg)
+        return False
+
+    def incremental_vacuum(self, pages: int = 100) -> None:
+        """Free up to *pages* pages of unused space via incremental vacuum."""
+        with self._connect() as conn:
+            conn.execute(f"PRAGMA incremental_vacuum({pages})")
 
     # ------------------------------------------------------------------
     # Write operations
