@@ -501,9 +501,9 @@ Phase 8 (SDK layer)
 | 16C — C#/.NET installers | complete | install/install_csharp.py |
 | 16D — Java/Lua/Native installers | complete | install/install_native.py |
 | 16E — C++ engine installers | complete | install/install_cpp.py — 110 Python tests |
-| 17A — Master installer | pending | install/wyrd_setup.py |
-| 17B — Self-healing setup | pending | install/ |
-| 17C — Uninstall & update | pending | install/ |
+| 17A — Master installer | complete | install/wyrd_setup.py — WyrdSetup, InstallLog, menu |
+| 17B — Self-healing setup | complete | install/wyrd_setup.py — DiagnosticsEngine, retry loop |
+| 17C — Uninstall & update | complete | install/wyrd_setup.py — --check/--uninstall/--update/--list — 77 Python tests |
 | 18A — WyrdHTTPServer hardening | pending | src/wyrdforge/ |
 | 18B — Bridge layer hardening | pending | integrations/ |
 | 18C — Memory/persistence hardening | pending | src/wyrdforge/persistence/ |
