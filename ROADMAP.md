@@ -296,8 +296,8 @@ Phase 8 (SDK layer)
 | 10E — D&D Beyond | complete | integrations/dndbeyond/wyrdforge/ |
 | 11A — Godot 4 | complete | integrations/godot/wyrdforge/ |
 | 11B — RPG Maker | complete | integrations/rpgmaker/wyrdforge/ |
-| 11C — GameMaker | pending | |
-| 11D — Construct 3 | pending | |
+| 11C — GameMaker | complete | integrations/gamemaker/wyrdforge/ |
+| 11D — Construct 3 | complete | integrations/construct3/wyrdforge/ |
 | 11E — MonoGame | pending | |
 | 11F — Defold | pending | |
 | 12A — OpenSim/SL | pending | |

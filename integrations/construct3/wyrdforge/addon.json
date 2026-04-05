@@ -1,0 +1,21 @@
+{
+  "is-c3-addon": true,
+  "type": "plugin",
+  "name": "WyrdForge",
+  "id": "WyrdForge",
+  "version": "1.0.0",
+  "author": "RuneForgeAI",
+  "website": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+  "documentation": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+  "description": "Connect Construct 3 games to a running WYRD Protocol server for deterministic AI world-state context. Query NPC world context, push observations and facts, and trigger events when responses arrive.",
+  "editor-scripts": ["plugin.js"],
+  "c3runtime-scripts": ["c3runtime/plugin.js", "c3runtime/instance.js"],
+  "lang-files": ["lang/en-US.json"],
+  "file-list": [
+    "addon.json",
+    "plugin.js",
+    "c3runtime/plugin.js",
+    "c3runtime/instance.js",
+    "lang/en-US.json"
+  ]
+}
