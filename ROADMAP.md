@@ -496,11 +496,11 @@ Phase 8 (SDK layer)
 | 15A — pygame bridge core | complete | integrations/pygame/wyrdforge/ |
 | 15B — pygame event loop hooks | complete | integrations/pygame/wyrdforge/ |
 | 15C — pygame tests | complete | integrations/pygame/wyrdforge/tests/ — 73 Python |
-| 16A — Python-target installers | pending | install/ |
-| 16B — JS/Node installers | pending | install/ |
-| 16C — C#/.NET installers | pending | install/ |
-| 16D — Java/Lua/Native installers | pending | install/ |
-| 16E — C++ engine installers | pending | install/ |
+| 16A — Python-target installers | complete | install/install_python.py |
+| 16B — JS/Node installers | complete | install/install_js.py |
+| 16C — C#/.NET installers | complete | install/install_csharp.py |
+| 16D — Java/Lua/Native installers | complete | install/install_native.py |
+| 16E — C++ engine installers | complete | install/install_cpp.py — 110 Python tests |
 | 17A — Master installer | pending | install/wyrd_setup.py |
 | 17B — Self-healing setup | pending | install/ |
 | 17C — Uninstall & update | pending | install/ |
