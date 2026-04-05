@@ -303,10 +303,10 @@ Phase 8 (SDK layer)
 | 12A — OpenSim/SL | complete | integrations/opensim/wyrdforge/ |
 | 12B — Minecraft | complete | integrations/minecraft/wyrdforge/ |
 | 12C — Roblox | complete | integrations/roblox/wyrdforge/ |
-| 13A — Unity | pending | |
-| 13B — Unreal Engine | pending | |
-| 13C — CryEngine | pending | |
-| 13D — O3DE/Lumberyard | pending | |
+| 13A — Unity | complete | integrations/unity/wyrdforge/ |
+| 13B — Unreal Engine | complete | integrations/unreal/wyrdforge/ |
+| 13C — CryEngine | complete | integrations/cryengine/wyrdforge/ |
+| 13D — O3DE/Lumberyard | complete | integrations/o3de/wyrdforge/ |
 | 14A — Prima Scholar | pending | |
 | 14B — WYRD TUI Editor | pending | |
 | 14C — WYRD Cloud Relay | pending | |

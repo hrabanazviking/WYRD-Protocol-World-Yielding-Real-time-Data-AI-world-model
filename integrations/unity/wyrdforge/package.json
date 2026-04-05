@@ -1,0 +1,23 @@
+{
+  "name": "com.wyrdforge.wyrdforge",
+  "version": "1.0.0",
+  "displayName": "WyrdForge",
+  "description": "WYRD Protocol bridge for Unity — grounds NPC dialogue and entity state in a deterministic ECS world model via WyrdHTTPServer.",
+  "unity": "2022.3",
+  "unityRelease": "0f1",
+  "documentationUrl": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
+  "changelogUrl": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://creativecommons.org/licenses/by/4.0/",
+  "dependencies": {},
+  "keywords": [
+    "wyrd",
+    "ai",
+    "npc",
+    "world-model",
+    "ecs"
+  ],
+  "author": {
+    "name": "Volmarr Wyrd (RuneForgeAI)",
+    "url": "https://github.com/hrabanazviking"
+  }
+}
