@@ -300,7 +300,7 @@ Phase 8 (SDK layer)
 | 11D — Construct 3 | complete | integrations/construct3/wyrdforge/ |
 | 11E — MonoGame | complete | integrations/monogame/wyrdforge/ |
 | 11F — Defold | complete | integrations/defold/wyrdforge/ |
-| 12A — OpenSim/SL | pending | |
+| 12A — OpenSim/SL | complete | integrations/opensim/wyrdforge/ |
 | 12B — Minecraft | pending | |
 | 12C — Roblox | pending | |
 | 13A — Unity | pending | |
