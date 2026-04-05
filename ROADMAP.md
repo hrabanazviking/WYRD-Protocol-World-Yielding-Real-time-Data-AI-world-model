@@ -493,9 +493,9 @@ Phase 8 (SDK layer)
 | 14B — WYRD TUI Editor | complete | tools/wyrd_tui.py |
 | 14C — WYRD Cloud Relay | complete | tools/wyrd_cloud_relay/ |
 | 14D — Docs site | complete | docs/ + mkdocs.yml |
-| 15A — pygame bridge core | pending | integrations/pygame/wyrdforge/ |
-| 15B — pygame event loop hooks | pending | integrations/pygame/wyrdforge/ |
-| 15C — pygame tests | pending | integrations/pygame/wyrdforge/tests/ |
+| 15A — pygame bridge core | complete | integrations/pygame/wyrdforge/ |
+| 15B — pygame event loop hooks | complete | integrations/pygame/wyrdforge/ |
+| 15C — pygame tests | complete | integrations/pygame/wyrdforge/tests/ — 73 Python |
 | 16A — Python-target installers | pending | install/ |
 | 16B — JS/Node installers | pending | install/ |
 | 16C — C#/.NET installers | pending | install/ |
