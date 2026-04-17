@@ -32,6 +32,11 @@
 - Do extensive bug hunting and bug fixing.
 - Trace the functions of all plugins and integrations to be sure they work really well with the programs they are designed to work with.
 - Create a single menu driven install script that is super automated and asks the user what they want to set WYRD for, and asks any need information of the user to get a extremely solid well working setup. Make sure it is robust, self healing, crash proof.
+- Keep the TODO.md file up to date.
+- Create a plugin for Ollama.
+- Create a plugin for LM Studio.
+- Create a plugin for Claude Code.
+- Create a plugin for VaM (Virt-a-Mate).
 
 
   
