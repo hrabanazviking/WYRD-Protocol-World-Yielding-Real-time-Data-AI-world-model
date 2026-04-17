@@ -37,6 +37,12 @@
 - Create a plugin for LM Studio.
 - Create a plugin for Claude Code.
 - Create a plugin for VaM (Virt-a-Mate).
+- Greatly expand documentation on how to use and setup, including for every plugin.
+- Greatly expand how user friendly WYRD is.
+- Check for any bugs.
+- Check for any ways to make WYRD run more efficently.
+- Make WYRD far more robust and work better.
+  
 
 
   
