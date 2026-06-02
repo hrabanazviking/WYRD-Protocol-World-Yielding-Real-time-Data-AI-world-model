@@ -1,6 +1,6 @@
 # WYRD Protocol — Post-v1.0.0 Integration Roadmap
 
-> **Base complete:** v1.0.0 on `development` — 7 phases, 432 tests.
+> **Base complete:** v1.0.0 on `development` — 7 phases, 1,042 tests.
 > This document covers everything after the core engine: client SDKs, engine plugins, platform bridges, and tooling.
 
 ---
