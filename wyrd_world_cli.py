@@ -153,7 +153,7 @@ def cmd_info(world: World, tree: YggdrasilTree, args: list[str]) -> None:
     print(f"  Components ({len(comps)}):")
     for comp in comps:
         print(f"    [{comp.component_type}]")
-        for field_name in comp.model_fields:
+        for field_name in type(comp).model_fields:
             if field_name in ("component_type", "entity_id", "schema_version", "created_at", "updated_at"):
                 continue
             val = getattr(comp, field_name)
