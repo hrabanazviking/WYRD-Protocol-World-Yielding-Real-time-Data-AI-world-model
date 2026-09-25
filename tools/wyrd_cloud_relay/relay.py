@@ -34,6 +34,28 @@ from collections import defaultdict
 from typing import Optional
 
 # ---------------------------------------------------------------------------
+# Optional web dependencies.
+# Imported at module level (with graceful fallback) so that FastAPI can
+# resolve the `Request` annotations on the route handlers below. The module
+# remains importable without FastAPI/httpx: the pure-logic classes above
+# work standalone, and create_app() raises a helpful error when called
+# without the web dependencies installed.
+# ---------------------------------------------------------------------------
+try:
+    import httpx
+    from fastapi import FastAPI, Request, Response, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    _WEB_DEPS_AVAILABLE = True
+except ImportError:  # pragma: no cover - optional dependency path
+    httpx = None  # type: ignore[assignment]
+    FastAPI = None  # type: ignore[assignment]
+    Request = None  # type: ignore[assignment]
+    Response = None  # type: ignore[assignment]
+    HTTPException = None  # type: ignore[assignment]
+    CORSMiddleware = None  # type: ignore[assignment]
+    _WEB_DEPS_AVAILABLE = False
+
+# ---------------------------------------------------------------------------
 # Pure relay logic (no FastAPI dependency — testable in isolation)
 # ---------------------------------------------------------------------------
 
@@ -147,14 +169,12 @@ def build_cors_headers(origins: list[str]) -> dict[str, str]:
 def create_app(config: RelayConfig):
     """
     Create and return the FastAPI application.
-    Imported separately so the module is importable without FastAPI installed.
+
+    The module is importable without FastAPI installed (pure-logic classes
+    above work standalone); calling this without the web dependencies
+    raises a helpful error.
     """
-    try:
-        import fastapi
-        import httpx
-        from fastapi import FastAPI, Request, Response, HTTPException
-        from fastapi.middleware.cors import CORSMiddleware
-    except ImportError:
+    if not _WEB_DEPS_AVAILABLE:
         raise ImportError(
             "FastAPI and httpx are required for the cloud relay.\n"
             "Install with: pip install fastapi uvicorn httpx"
@@ -163,7 +183,7 @@ def create_app(config: RelayConfig):
     app        = FastAPI(title="WYRD Cloud Relay", version="1.0.0")
     limiter    = RateLimiter(config.rate_limit)
     validator  = TokenValidator(config.tokens)
-    http       = httpx.AsyncClient(timeout=config.timeout)
+    http       = httpx.AsyncClient(timeout=config.timeout, trust_env=False)
 
     app.add_middleware(
         CORSMiddleware,
