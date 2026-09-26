@@ -1,6 +1,9 @@
 # WYRD Protocol — Post-v1.0.0 Integration Roadmap
 
 > **Base complete:** v1.0.0 on `development` — 7 phases, 1,042 tests.
+> **Mind wiring:** time awareness, theory of mind, micro-realities, and
+> metaphysical theory of mind (Level 101) wired into the ECS world model —
+> `docs/specs/mind-wiring.md`, +19 tests.
 > This document covers everything after the core engine: client SDKs, engine plugins, platform bridges, and tooling.
 
 ---
