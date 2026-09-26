@@ -21,6 +21,11 @@ class World:
         self.world_name: str = world_name or world_id
         self.created_at: datetime = _now()
 
+        # World identity in the registry of worlds (Roadmap Worlds, Slice 0).
+        # Declared via identify(); None until then — identity is declared,
+        # never assumed.
+        self.identity = None
+
         # Primary stores
         self._entities: dict[str, Entity] = {}
         # entity_id → {component_type: Component}
@@ -170,6 +175,34 @@ class World:
             comp = self._components.get(entity_id, {}).get(component_type)
             if entity and comp and entity.active:
                 yield entity, comp
+
+    # ------------------------------------------------------------------
+    # World identity (Roadmap Worlds, Slice 0)
+    # ------------------------------------------------------------------
+    def identify(self, *, kind: str = "wyrd", reality: str = "potential",
+                 description: str = "", source: str = ""):
+        """Declare this world's identity in the registry of worlds.
+
+        kind is always "wyrd" for WYRD worlds; reality is "manifest" only
+        when the world models manifest entities, otherwise "potential".
+        """
+        from wyrdforge.ecs.components.world_identity import WorldIdentity
+        self.identity = WorldIdentity(
+            world_id=self.world_id,
+            kind=kind,
+            reality=reality,
+            description=description or self.world_name,
+            source=source or "WYRD Protocol ECS world",
+        )
+        return self.identity
+
+    def registry_entry(self) -> dict:
+        """The handshake dict for Verðandi's WorldRegistry.register()."""
+        from wyrdforge.ecs.components.world_identity import UnidentifiedWorldError
+        if self.identity is None:
+            raise UnidentifiedWorldError(
+                f"World '{self.world_id}' has no identity — call identify() first.")
+        return self.identity.registry_entry()
 
     # ------------------------------------------------------------------
     # Internal helpers
