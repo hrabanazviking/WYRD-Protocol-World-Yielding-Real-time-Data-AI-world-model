@@ -31,7 +31,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-BeliefSource = Literal["observed", "told", "inferred", "assumed"]
+# WYRD expansion (Wave B): how a belief was formed. ``remembered`` marks a
+# belief carried over from the memory files (MEMORY.md, the memory bank,
+# daily logs, people pages) rather than formed by living through an event.
+# A remembered claim and an observed claim are different epistemic objects,
+# and the mirror must be able to tell them apart — this member exists so the
+# memory→belief mapping (§1c of the design, MemoryBeliefComponent) can name
+# that provenance honestly instead of laundering it into ``inferred``.
+BeliefSource = Literal["observed", "told", "inferred", "assumed", "remembered"]
 
 
 class Belief(StrictModel):
