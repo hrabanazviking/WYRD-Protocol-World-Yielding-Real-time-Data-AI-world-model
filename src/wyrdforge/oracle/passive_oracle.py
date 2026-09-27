@@ -51,6 +51,10 @@ from wyrdforge.oracle.models import (
     WorldContextPacket,
 )
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
+from wyrdforge.services.self_correction import (
+    format_confidence_history,
+    is_uncertain,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +298,13 @@ class PassiveOracle:
                         fact_value=f.content.structured_payload.fact_value,
                         confidence=f.truth.confidence,
                         domain=f.content.structured_payload.domain,
+                        # Track 7: confidence now has consequences. Sub-0.3
+                        # facts render uncertain with history; >= 0.3 renders
+                        # exactly as before. This is the only writer-to-reader
+                        # path: SelfCorrectionService writes
+                        # TruthMeta.confidence_history; this packet reads it.
+                        uncertain=is_uncertain(f.truth.confidence),
+                        confidence_history=list(f.truth.confidence_history),
                     )
                     for f in facts
                 ]
@@ -505,9 +516,23 @@ class PassiveOracle:
             for subject_id, facts in canonical_facts.items():
                 lines.append(f"  {subject_id}:")
                 for f in sorted(facts, key=lambda x: x.fact_key):
-                    lines.append(
-                        f"    • {f.fact_key} = {f.fact_value} (conf: {f.confidence:.2f})"
-                    )
+                    # Track 7: sub-threshold facts are reported as uncertain
+                    # WITH their history — never silently, never as flat fact.
+                    # Facts at >= 0.3 render exactly as before this slice.
+                    if f.uncertain:
+                        chain = (
+                            format_confidence_history(f.confidence_history)
+                            if f.confidence_history
+                            else f"{f.confidence:.10g}"
+                        )
+                        lines.append(
+                            f"    • {f.fact_key} = {f.fact_value} "
+                            f"(uncertain, conf: {f.confidence:.2f} — was {chain})"
+                        )
+                    else:
+                        lines.append(
+                            f"    • {f.fact_key} = {f.fact_value} (conf: {f.confidence:.2f})"
+                        )
 
         # Policies
         if policies:

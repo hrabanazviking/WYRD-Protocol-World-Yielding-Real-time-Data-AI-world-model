@@ -94,6 +94,12 @@ class MemoryContent(StrictModel):
 class TruthMeta(StrictModel):
     support_class: SupportClass = SupportClass.SUPPORTED
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Confidence chain written by SelfCorrectionService (Track 7):
+    # history[0] is the starting confidence; each later entry is the
+    # post-step value. Empty until the first contradict/reconfirm step.
+    # The memory tree is never written by the heartbeat — this field is
+    # stepped in the repo's own domain only (see self_correction module).
+    confidence_history: list[float] = Field(default_factory=list)
     contradiction_status: ContradictionStatus = ContradictionStatus.NONE
     approval_state: ApprovalState = ApprovalState.PENDING
 

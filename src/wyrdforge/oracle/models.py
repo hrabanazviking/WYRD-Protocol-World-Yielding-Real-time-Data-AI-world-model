@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import Field
+
 from wyrdforge.models.common import StrictModel
 
 
@@ -47,6 +49,11 @@ class FactSummary(StrictModel):
     fact_value: str
     confidence: float
     domain: str
+    # Track 7: facts at confidence strictly below UNCERTAINTY_THRESHOLD (0.3)
+    # render as uncertain with their confidence history instead of asserted.
+    # Both defaulted — existing callers are unaffected.
+    uncertain: bool = False
+    confidence_history: list[float] = Field(default_factory=list)
 
 
 class PolicySummary(StrictModel):
