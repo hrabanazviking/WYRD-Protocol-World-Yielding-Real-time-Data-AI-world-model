@@ -20,12 +20,11 @@ Track: Track 7, Phase 1 (this file), fed by Phase 2 (confidence with teeth,
 
 ## Feed status — updated 2026-09-27
 
-Feed wired, accumulating. The live divergence feed (the minutely
-`wyrd-mirror-bridge` worker's inbound watch) is running and firing all four
-kinds. Ledger appends begin when the worker wiring diffs (ledger-append step
-+ reporting-contract line, specified in the Slice 8 plan) are approved — the
-ledger must not invent entries for divergences it did not witness. Until
-then: schema, rules, and this dated head note.
+Wiring live, accumulating. The ledger-append step runs in the minutely
+`wyrd-mirror-bridge` worker — the wiring live since 2026-09-27 (approved by
+Volmarr): every new `wyrd_divergence` event becomes a `CONTRADICTION-NNN`
+entry below; `wyrd_divergence_resolved` closes it. The ledger witnesses only
+what the wiring saw — nothing is invented here.
 
 ---
 
@@ -69,9 +68,8 @@ fires loudly; the *correction* follows the confidence rules
 The measurable target: 100% of fired divergences logged; a monthly read
 asking "what pattern of wrongness keeps recurring?"
 
-- **First read:** 2026-10-27 (30 days after this ledger shipped 2026-09-27).
-  Re-date this note when the worker ledger-append wiring goes live — the
-  30-day windows run from live feed, not from this document.
+- **First read:** 2026-10-27 (30 days after the ledger went live 2026-09-27).
+  The 30-day windows run from live feed.
 - **Standing rule:** every subsequent read is dated in the ledger head, like
   the bug ledger's triage line. A calendar note, not a hope.
 - **Silence is data too:** a divergence kind with no entries after 30 days
@@ -82,5 +80,4 @@ asking "what pattern of wrongness keeps recurring?"
 
 ## Entries
 
-_No entries yet. Entries begin when the ledger-append wiring is approved.
-Nothing is invented here._
+_Entries begin 2026-09-27, when the ledger-append wiring went live. Nothing is invented here._

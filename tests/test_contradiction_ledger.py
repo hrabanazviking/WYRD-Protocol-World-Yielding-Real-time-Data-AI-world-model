@@ -96,11 +96,24 @@ def test_monthly_read_note_is_dated():
     assert re.search(r"\d{4}-\d{2}-\d{2}", section), "monthly read note must be dated"
 
 
-def test_ledger_does_not_invent_entries():
-    """Until the worker wiring is approved, the ledger must hold no entries —
-    the ledger must not invent divergences it did not witness."""
-    text = _text()
-    entries = _entries(text)
-    assert entries == [], (
-        f"ledger must ship empty (wiring not approved); found {[t for t, _ in entries]}"
-    )
+GO_LIVE_DATE = "2026-09-27"  # worker ledger-append wiring approved and installed
+
+
+def test_ledger_wiring_is_live():
+    """The feed-status head must declare the wiring live with a date — entries
+    are only legitimate once the worker appends them."""
+    section = _text().split("## Feed status", 1)[1].split("\n## ", 1)[0]
+    assert "wiring live" in section, "feed status must declare the wiring live"
+    m = re.search(r"(\d{4}-\d{2}-\d{2})", section)
+    assert m and m.group(1) >= GO_LIVE_DATE, "feed status live date must be dated"
+
+
+def test_entries_not_from_before_go_live():
+    """The ledger must not invent entries for divergences the wiring did not
+    witness — every entry's Date fired is on/after the go-live date."""
+    for title, body in _entries(_text()):
+        m = re.search(r"- \*\*Date fired:\*\*\s*(\d{4}-\d{2}-\d{2})", body)
+        assert m, f"{title}: no parseable Date fired"
+        assert m.group(1) >= GO_LIVE_DATE, (
+            f"{title}: Date fired {m.group(1)} predates wiring go-live {GO_LIVE_DATE}"
+        )
