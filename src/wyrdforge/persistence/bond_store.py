@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from wyrdforge.models.bond import BondEdge, Hurt, Vow
+from wyrdforge.hardening.state_io import open_or_quarantine
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS bond_edges (
@@ -64,7 +65,10 @@ class PersistentBondStore:
     # ------------------------------------------------------------------
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        # Guarded open: a corrupt DB is quarantined (announced once) and a
+        # fresh one created — the constructor never crashes on bad bytes.
+        conn, _recovered = open_or_quarantine(self._db_path, current_version=1)
+        with conn:
             conn.executescript(_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
@@ -229,3 +233,16 @@ class PersistentBondStore:
     def count_hurts(self) -> int:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM hurts").fetchone()[0]
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+
+    def integrity_check(self) -> bool:
+        """Run SQLite's integrity_check pragma; True when the DB is healthy.
+
+        Added for parity with WorldStore and PersistentMemoryStore.
+        """
+        with self._connect() as conn:
+            result = conn.execute("PRAGMA integrity_check").fetchone()
+            return result is not None and result[0] == "ok"

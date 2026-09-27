@@ -1346,17 +1346,22 @@ def _read_hub_liveness(state_dir: str) -> tuple[str, str | None]:
     return _HUB_STATE_TO_STATUS.get(raw, "warn"), raw
 
 
-def _read_forge_queue_depth(queue_dir: str) -> int | None:
-    """Queued + running forge jobs, mirroring ``heilsiðr-queue list``.
+def _read_forge_queue_depth(queue_dir: str) -> tuple[int | None, int | None]:
+    """(Queued + running forge jobs, torn job-file count).
 
     Depth is a fact, not a judgment — informational, no thresholds.
-    None when the queue directory is unreadable.
+    (None, None) when the queue directory is unreadable.
+    Torn files — unparseable JSON, or valid JSON that is not a queued /
+    running job dict — are skipped in the depth count and tallied in the
+    torn counter, so "3 torn files this week" is a fact, not a feeling.
+    The degrade itself is unchanged: torn files never block the count.
     """
     try:
         names = os.listdir(queue_dir)
     except OSError:
-        return None
+        return None, None
     depth = 0
+    torn = 0
     for name in names:
         if not name.endswith(".json"):
             continue
@@ -1365,21 +1370,28 @@ def _read_forge_queue_depth(queue_dir: str) -> int | None:
                       encoding="utf-8") as fh:
                 data = json.load(fh)
         except (OSError, ValueError):
+            torn += 1
             continue
         if isinstance(data, dict) and data.get("status") in ("queued",
                                                              "running"):
             depth += 1
-    return depth
+        else:
+            torn += 1
+    return depth, torn
 
 
 def _read_nerve_feed_rate(feed_path: str,
-                          now_ts: float) -> tuple[float | None, str]:
-    """(events/min over the last 5 minutes, status).
+                          now_ts: float) -> tuple[float | None, str, int | None]:
+    """(events/min over the last 5 minutes, status, torn line count).
 
     Warns on silence (nothing on the nerve for 15+ minutes) or flood
     (> 200 events/min — the design's threshold, reused not invented).
+    Torn lines (unparseable JSON, or valid JSON without a numeric ``_ts``)
+    are skipped and tallied — the append-only log is never quarantined,
+    it is counted.
     """
     count = 0
+    torn = 0
     latest: float | None = None
     try:
         with open(feed_path, encoding="utf-8") as fh:
@@ -1390,22 +1402,24 @@ def _read_nerve_feed_rate(feed_path: str,
                 try:
                     entry = json.loads(line)
                 except ValueError:
+                    torn += 1
                     continue
                 ts = entry.get("_ts")
                 if not isinstance(ts, (int, float)):
+                    torn += 1
                     continue
                 if latest is None or ts > latest:
                     latest = ts
                 if ts >= now_ts - 300:
                     count += 1
     except OSError:
-        return None, "warn"
+        return None, "warn", None
     rate = count / 5.0
     if latest is None or (now_ts - latest) > 900:
-        return rate, "warn"
+        return rate, "warn", torn
     if rate > 200:
-        return rate, "warn"
-    return rate, "ok"
+        return rate, "warn", torn
+    return rate, "ok", torn
 
 
 _QUIET_START = (10, 30)
@@ -1441,7 +1455,9 @@ def sample_senses(*, home: str | None = None,
     | mem_available  | /proc/meminfo MemAvailable          | Heilsiðr: ok≥1000/warn<1000/red<500 MiB |
     | hub_liveness   | sweep state ~/.hermes/state/heilsiðr/hub.state | ok=responsive, warn=restarted, red=down |
     | forge_queue    | heilsiðr-queue list count           | informational (no thresholds) |
+    | forge_queue_torn_jobs | torn .json in the queue dir   | informational counter (Track 5) |
     | nerve_feed_rate| events in last 5 min of nerve_feed  | warn on silence>15min or flood>200/min |
+    | nerve_feed_torn_lines | torn lines in nerve_feed.jsonl | informational counter (Track 5) |
     | quiet_window   | wall clock 10:30–11:30 local        | informational boolean |
     """
     home = home or os.path.expanduser("~")
@@ -1453,8 +1469,8 @@ def sample_senses(*, home: str | None = None,
 
     mib = _read_mem_available_mib(meminfo_path)
     hub_status, hub_raw = _read_hub_liveness(state_dir)
-    depth = _read_forge_queue_depth(queue_dir)
-    rate, feed_status = _read_nerve_feed_rate(feed_path, now_ts)
+    depth, torn_jobs = _read_forge_queue_depth(queue_dir)
+    rate, feed_status, torn_lines = _read_nerve_feed_rate(feed_path, now_ts)
     quiet = _quiet_window_active(at)
 
     return [
@@ -1468,8 +1484,19 @@ def sample_senses(*, home: str | None = None,
                      value=depth, unit="jobs",
                      status="ok" if depth is not None else "warn",
                      sampled_at=at),
+        # Torn-input counters (Track 5): the degrade paths above are
+        # unchanged; these senses make the degrade *announced*. A missing
+        # source reads None — same "unverified is a raised eyebrow" rule.
+        SenseReading(sense_kind="machine", metric="forge_queue_torn_jobs",
+                     value=torn_jobs, unit="files",
+                     status="ok" if torn_jobs is not None else "warn",
+                     sampled_at=at),
         SenseReading(sense_kind="feed", metric="nerve_feed_rate",
                      value=rate, unit="events/min", status=feed_status,
+                     sampled_at=at),
+        SenseReading(sense_kind="feed", metric="nerve_feed_torn_lines",
+                     value=torn_lines, unit="lines",
+                     status="ok" if torn_lines is not None else "warn",
                      sampled_at=at),
         SenseReading(sense_kind="machine", metric="quiet_window_active",
                      value=quiet, unit="bool", status="ok",

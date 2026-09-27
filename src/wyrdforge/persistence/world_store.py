@@ -7,6 +7,7 @@ from pathlib import Path
 from wyrdforge.ecs.component import deserialize_component
 from wyrdforge.ecs.entity import Entity
 from wyrdforge.ecs.world import World
+from wyrdforge.hardening.state_io import open_or_quarantine
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS worlds (
@@ -60,7 +61,10 @@ class WorldStore:
     # ------------------------------------------------------------------
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        # Guarded open: a corrupt DB is quarantined (announced once) and a
+        # fresh one created — the constructor never crashes on bad bytes.
+        conn, _recovered = open_or_quarantine(self._db_path, current_version=1)
+        with conn:
             conn.executescript(_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:

@@ -5,4 +5,6 @@ Modules:
     normalization    — Unicode-safe persona_id normalisation guard
     pool             — Bounded daemon-thread pool (caps concurrent push operations)
     config_validator — YAML world-config schema validator + env-var type coercer
+    state_io         — Corrupt-state detection and repair (Track 5): quarantine,
+                       guarded SQLite opens, schema versions, atomic JSON writes
 """
