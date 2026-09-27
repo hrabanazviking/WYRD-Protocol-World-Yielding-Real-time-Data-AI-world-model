@@ -25,6 +25,7 @@ from wyrdforge.hardening.config_validator import (
     report_active_config,
     ConfigValidationError,
 )
+from wyrdforge.hardening.input_validation import InputValidationError
 
 
 # ===========================================================================
@@ -334,66 +335,102 @@ class TestBoundedThreadPool:
 # ===========================================================================
 
 class TestValidateWorldConfig:
+    """Tests the canonical schema (Track 1, P1): ``world_id``,
+    ``world_name``, optional ``description``/``zones``, four nested
+    levels, unknown fields as hard errors.
+
+    This is a schema correction, not test weakening: the old tests
+    asserted the validator's aspirational fields (``name``,
+    ``entities``, ``factions``, silent wrong-type defaults), which
+    never matched the loader or the canonical world files. The new
+    tests assert the schema the tree actually consumes.
+    """
+
     def _minimal(self):
-        return {"world_id": "thornholt", "name": "Thornholt"}
+        return {"world_id": "thornholt", "world_name": "Thornholt"}
 
     def test_minimal_valid_passes(self):
         result = validate_world_config(self._minimal())
         assert result["world_id"] == "thornholt"
+        assert result["world_name"] == "Thornholt"
 
-    def test_fills_default_zones(self):
-        result = validate_world_config(self._minimal())
-        assert result["zones"] == []
-
-    def test_fills_default_entities(self):
-        result = validate_world_config(self._minimal())
-        assert result["entities"] == []
+    def test_full_tree_valid_passes(self):
+        config = self._minimal()
+        config["zones"] = [{
+            "id": "midgard", "name": "Midgard",
+            "regions": [{
+                "id": "fjords", "name": "The Fjords",
+                "locations": [{
+                    "id": "hall", "name": "Hall",
+                    "sublocations": [{"id": "table", "name": "Table"}],
+                }],
+            }],
+        }]
+        result = validate_world_config(config)
+        assert result["zones"][0]["regions"][0]["locations"][0]["id"] == "hall"
 
     def test_missing_world_id_raises(self):
         with pytest.raises(ConfigValidationError) as exc_info:
-            validate_world_config({"name": "Thornholt"})
+            validate_world_config({"world_name": "Thornholt"})
         assert "world_id" in str(exc_info.value)
 
-    def test_missing_name_raises(self):
+    def test_missing_world_name_raises(self):
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_world_config({"world_id": "thornholt"})
-        assert "name" in str(exc_info.value)
+        assert "world_name" in str(exc_info.value)
 
     def test_empty_world_id_raises(self):
         with pytest.raises(ConfigValidationError):
-            validate_world_config({"world_id": "  ", "name": "T"})
+            validate_world_config({"world_id": "  ", "world_name": "T"})
 
     def test_wrong_type_world_id_raises(self):
         with pytest.raises(ConfigValidationError):
-            validate_world_config({"world_id": 123, "name": "T"})
+            validate_world_config({"world_id": 123, "world_name": "T"})
 
     def test_non_dict_input_raises(self):
         with pytest.raises(ConfigValidationError):
             validate_world_config(["not", "a", "dict"])
 
-    def test_entity_must_be_dict(self):
+    def test_unknown_top_level_field_is_hard_error(self):
         config = self._minimal()
-        config["entities"] = ["not_a_dict"]
+        config["entities"] = [{"id": "sigrid"}]  # not a world-file field
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_world_config(config)
         assert "entities" in str(exc_info.value)
 
-    def test_wrong_type_zones_uses_default(self):
+    def test_unknown_zone_field_names_dotted_path(self):
+        config = self._minimal()
+        config["zones"] = [{"id": "z", "name": "Z", "bogus": 1}]
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_world_config(config)
+        assert "zones[0].bogus" in str(exc_info.value)
+
+    def test_zone_missing_id_raises(self):
+        config = self._minimal()
+        config["zones"] = [{"name": "No Id"}]
+        with pytest.raises(ConfigValidationError):
+            validate_world_config(config)
+
+    def test_wrong_type_zones_raises(self):
         config = self._minimal()
         config["zones"] = "not_a_list"
-        result = validate_world_config(config)
-        assert result["zones"] == []
+        with pytest.raises(ConfigValidationError):
+            validate_world_config(config)
 
-    def test_valid_entities_pass(self):
+    def test_zone_node_must_be_dict(self):
         config = self._minimal()
-        config["entities"] = [{"id": "sigrid", "name": "Sigrid"}]
-        result = validate_world_config(config)
-        assert len(result["entities"]) == 1
+        config["zones"] = ["not_a_dict"]
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_world_config(config)
+        assert "zones[0]" in str(exc_info.value)
 
     def test_field_attribute_set_on_error(self):
         with pytest.raises(ConfigValidationError) as exc_info:
-            validate_world_config({"name": "T"})
-        assert exc_info.value.field == "world_id"
+            validate_world_config({"world_name": "T"})
+        assert exc_info.value.field == "$.world_id"
+
+    def test_config_validation_error_is_input_validation_error(self):
+        assert issubclass(ConfigValidationError, InputValidationError)
 
 
 # ===========================================================================

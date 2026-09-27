@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from wyrdforge.hardening.config_validator import ConfigValidationError
 from wyrdforge.models.common import RetentionClass, WritePolicy
 from wyrdforge.models.memory import MemoryRecord
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
@@ -48,6 +49,12 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
         return _DEFAULT_CONFIG
     with path.open("r", encoding="utf-8") as fh:
         loaded = yaml.safe_load(fh) or {}
+    if not isinstance(loaded, dict):
+        raise ConfigValidationError(
+            f"memory promotion config {path} must be a mapping, got "
+            f"{type(loaded).__name__}",
+            field="$",
+        )
     # Merge with defaults (shallow merge per top-level key)
     merged = dict(_DEFAULT_CONFIG)
     for k, v in loaded.items():

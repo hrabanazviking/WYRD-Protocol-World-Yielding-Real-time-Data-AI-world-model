@@ -301,7 +301,11 @@ class TestEventEndpoint:
     def test_bridge_exception_returns_500(self):
         with LiveServer() as srv:
             srv.bridge.push_event.side_effect = RuntimeError("db error")
-            status, body = srv.post("/event", {"event_type": "observation", "payload": {}})
+            # Valid observation payload: passes input validation so the
+            # request reaches the (failing) bridge → 500.
+            status, body = srv.post("/event", {"event_type": "observation",
+                                               "payload": {"title": "T",
+                                                           "summary": "S"}})
         assert status == 500
         assert "error" in body
 

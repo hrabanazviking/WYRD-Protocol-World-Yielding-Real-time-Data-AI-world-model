@@ -208,6 +208,11 @@ from wyrdforge.ecs.component import Component, register_component
 from wyrdforge.ecs.components.temporal import TemporalAnchorComponent
 from wyrdforge.ecs.components.theory_of_mind import Belief, BeliefComponent
 from wyrdforge.ecs.world import World
+from wyrdforge.hardening.input_validation import (
+    MAX_DESCRIPTION_CHARS,
+    InputValidationError,
+    validate_event_envelope,
+)
 from wyrdforge.models.common import StrictModel
 
 WORLD_ID = "heimr-wyrd-unnr"
@@ -243,6 +248,36 @@ def _utc(ts: float | None = None) -> datetime:
 def _short(text: str, limit: int = LABEL_LIMIT) -> str:
     text = " ".join(str(text or "").split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _str_list(value: Any) -> list[str]:
+    """Coerce-or-drop: a list/tuple of scalars becomes strings;
+    anything else (dict, int, str) is dropped to []."""
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value
+                if isinstance(v, (str, int, float)) and not isinstance(v, bool)]
+    return []
+
+
+def _str_dict(value: Any) -> dict:
+    """Coerce-or-drop for mappings: non-dicts become {}."""
+    return value if isinstance(value, dict) else {}
+
+
+def _num_dict(value: Any) -> dict:
+    """Coerce-or-drop for numeric mappings (mood readings): keeps only
+    int/float values so arithmetic downstream cannot TypeError."""
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)}
+
+
+def _bounded(text: Any, limit: int = MAX_DESCRIPTION_CHARS) -> str:
+    """Stringify and cap stored text. The envelope bounds the whole
+    payload; this caps what the world *keeps* per field."""
+    s = str(text or "")
+    return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
 # ---------------------------------------------------------------------------
@@ -533,11 +568,46 @@ class VerdandiBridge:
     def apply_event(self, event_type: str, data: dict,
                     ts: float | None = None) -> str | None:
         """Apply one nerve event. Returns a short description of the
-        mutation, or None when the event type is not mapped."""
+        mutation, or None when the event type is not mapped — or when
+        the event is refused.
+
+        The nerve feed is an external, occasionally torn source: this
+        door *refuses* malformed input with None instead of raising.
+        Truthy non-dict data, non-string event types, over-deep or
+        over-size payloads are all refused (never coerced, never
+        crashed). Falsy data (None) keeps the historical ``{}`` path.
+        """
+        if not isinstance(event_type, str):
+            return None
         handler = self._handlers().get(event_type)
         if handler is None:
             return None
-        return handler(data or {}, _utc(ts))
+        guarded = self._guard_data(data)
+        if guarded is None:
+            return None
+        try:
+            at = _utc(ts)
+        except (TypeError, ValueError, OverflowError, OSError):
+            at = _utc(None)
+        return handler(guarded, at)
+
+    @staticmethod
+    def _guard_data(data: Any) -> dict | None:
+        """Fail-closed shape check for one event payload.
+
+        Returns the dict unchanged, ``{}`` for falsy data, or None
+        when the payload is refused (truthy non-dict, over-deep, or
+        over the byte cap).
+        """
+        if not data:
+            return {}
+        if not isinstance(data, dict):
+            return None
+        try:
+            validate_event_envelope("$event", data)
+        except InputValidationError:
+            return None
+        return data
 
     def _handlers(self) -> dict:
         return {
@@ -572,9 +642,16 @@ class VerdandiBridge:
         }
 
     def build_from_events(self, events: list[dict]) -> "VerdandiBridge":
-        """Replay a sequence of nerve-feed entries into a fresh bridge."""
+        """Replay a sequence of nerve-feed entries into a fresh bridge.
+
+        Torn entries (non-dict lines) are skipped, never crashed on —
+        the feed is an external source and a torn line is refused the
+        same way a malformed event is.
+        """
         fresh = VerdandiBridge()
         for entry in events:
+            if not isinstance(entry, dict):
+                continue
             fresh.apply_event(entry.get("type", ""),
                               entry.get("data", {}),
                               entry.get("_ts"))
@@ -590,12 +667,13 @@ class VerdandiBridge:
 
     def _add_belief(self, subject: str, claim: str,
                     confidence: float, source: str = "observed") -> None:
+        subject = _bounded(subject, 500)
         beliefs = self._beliefs()
         existing = beliefs.get_belief(subject)
         if existing is not None:
             beliefs.beliefs.remove(existing)
         beliefs.beliefs.append(Belief(
-            subject=subject, claim=claim,
+            subject=subject, claim=_bounded(claim),
             confidence=confidence, source=source))
         beliefs.touch()
 
@@ -615,7 +693,7 @@ class VerdandiBridge:
 
     # -- mapped events ---------------------------------------------------
     def _mood_shift(self, data: dict, at: datetime) -> str:
-        after = data.get("after", {})
+        after = _num_dict(data.get("after"))
         why = data.get("why", "")
         desc = ", ".join(f"{k} {after.get(k, '?')}" for k in
                          ("valence", "energy", "tension") if k in after)
@@ -684,7 +762,7 @@ class VerdandiBridge:
     def _utterance(self, data: dict, at: datetime) -> str:
         speaker = str(data.get("speaker", "?"))
         text = str(data.get("text", ""))
-        emotions = [str(e) for e in (data.get("emotion") or []) if e]
+        emotions = _str_list(data.get("emotion"))
         label = f"{speaker} said: {_short(text, UTTERANCE_LABEL_LIMIT)}"
         eid = self._add_anchor(label, at, tags={"conversation", speaker})
         self.world.add_component(eid, UtteranceComponent(
@@ -699,7 +777,7 @@ class VerdandiBridge:
     def _emote(self, data: dict, at: datetime) -> str:
         speaker = str(data.get("speaker", "?"))
         emote = str(data.get("emote", ""))
-        emotions = [str(e) for e in (data.get("emotion") or []) if e]
+        emotions = _str_list(data.get("emotion"))
         emo_txt = ", ".join(emotions) if emotions else emote
         label = f"{speaker} {emote}" + (f" ({emo_txt})" if emo_txt else "")
         self._add_anchor(label, at, tags={"conversation", "emote", speaker})
@@ -762,11 +840,12 @@ class VerdandiBridge:
         return label
 
     def _self_recognized(self, data: dict, at: datetime) -> str:
-        verdicts = data.get("verdicts", {}) or {}
+        verdicts = _str_dict(data.get("verdicts"))
         aligned = sum(1 for v in verdicts.values() if v == "aligned")
         label = f"self-recognition: {aligned}/{len(verdicts)} aligned"
-        if data.get("note"):
-            label += f" — {_short(data['note'], 60)}"
+        note = data.get("note")
+        if note:
+            label += f" — {_short(note, 60)}"
         self._add_anchor(label, at, tags={"world-event", "self"})
         return label
 
@@ -814,7 +893,7 @@ class VerdandiBridge:
            path (``reflection:<digest[:12]>``), which cannot collide —
            that path is left untouched.
         """
-        thought = " ".join(str(data.get("thought", "")).split())
+        thought = _bounded(" ".join(str(data.get("thought", "")).split()))
         if not thought:
             # No genuine thought arrived — there is nothing to map, and
             # nothing is invented to fill the gap.
@@ -844,7 +923,7 @@ class VerdandiBridge:
         except (TypeError, ValueError):
             seq_n = None
         eid = f"reflection:{seq_n if seq_n is not None else digest[:12]}"
-        about = [str(a) for a in (data.get("about") or []) if a]
+        about = _str_list(data.get("about"))
         if seq_n is not None:
             # Seq-collision guard (see docstring guard 4): two different
             # thoughts may never share one reflection:<seq>. If the

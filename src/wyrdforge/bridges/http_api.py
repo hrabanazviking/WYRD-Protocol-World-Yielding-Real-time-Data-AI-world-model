@@ -38,6 +38,16 @@ class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 from typing import Any, Optional
 
 from wyrdforge.bridges.python_rpg import PythonRPGBridge
+from wyrdforge.hardening.input_validation import (
+    MAX_EVENT_DEPTH,
+    MAX_ID_CHARS,
+    MAX_QUERY_INPUT_CHARS,
+    InputValidationError,
+    check_depth,
+    check_string,
+    validate_event_envelope,
+    validate_event_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +55,20 @@ logger = logging.getLogger(__name__)
 # 413 Content Too Large without reading the full body — prevents memory exhaustion.
 DEFAULT_MAX_REQUEST_BYTES: int = 1 * 1024 * 1024  # 1 MiB
 
+# Cap on how much of an over-limit body is drained before the 413 goes
+# out (flat 64 KiB chunks — memory stays constant). Past this, the
+# connection is closed on the abusive client.
+_DRAIN_CAP_BYTES: int = 64 * 1024 * 1024
+
+
+def _drain(rfile, nbytes: int) -> None:
+    """Read and discard *nbytes* from *rfile* in flat-memory chunks."""
+    remaining = nbytes
+    while remaining > 0:
+        chunk = rfile.read(min(65536, remaining))
+        if not chunk:
+            break
+        remaining -= len(chunk)
 
 # ---------------------------------------------------------------------------
 # Request handler
@@ -88,17 +112,39 @@ class _WyrdHandler(BaseHTTPRequestHandler):
         body = self._read_json()
         if body is None:
             return
-        persona_id = body.get("persona_id", "")
-        user_input = body.get("user_input", "")
-        if not persona_id or not user_input:
-            self._send_error(400, "persona_id and user_input are required")
+        try:
+            # The body envelope itself consumes one level, so the body
+            # budget is the payload budget plus one.
+            check_depth(body, max_depth=MAX_EVENT_DEPTH + 1, field="body")
+            persona_id = check_string(
+                body.get("persona_id"), field="persona_id",
+                max_len=MAX_ID_CHARS, allow_empty=False,
+            )
+            user_input = check_string(
+                body.get("user_input"), field="user_input",
+                max_len=MAX_QUERY_INPUT_CHARS, allow_empty=False,
+            )
+            location_id = body.get("location_id")
+            if location_id is not None:
+                location_id = check_string(
+                    location_id, field="location_id",
+                    max_len=MAX_ID_CHARS, allow_empty=False,
+                )
+            bond_id = body.get("bond_id")
+            if bond_id is not None:
+                bond_id = check_string(
+                    bond_id, field="bond_id",
+                    max_len=MAX_ID_CHARS, allow_empty=False,
+                )
+        except InputValidationError as exc:
+            self._send_error(400, str(exc))
             return
         try:
             response = self.bridge.query(
                 persona_id,
                 user_input,
-                location_id=body.get("location_id"),
-                bond_id=body.get("bond_id"),
+                location_id=location_id,
+                bond_id=bond_id,
                 use_turn_loop=bool(body.get("use_turn_loop", True)),
             )
             self._send_json({"response": response})
@@ -121,8 +167,13 @@ class _WyrdHandler(BaseHTTPRequestHandler):
                 k, _, v = part.partition("=")
                 params[k] = v
         entity_id = params.get("entity_id", "")
-        if not entity_id:
-            self._send_error(400, "entity_id query param required")
+        try:
+            entity_id = check_string(
+                entity_id, field="entity_id",
+                max_len=MAX_ID_CHARS, allow_empty=False,
+            )
+        except InputValidationError as exc:
+            self._send_error(400, str(exc))
             return
         try:
             facts = self.bridge.oracle.get_facts(entity_id)
@@ -135,10 +186,16 @@ class _WyrdHandler(BaseHTTPRequestHandler):
         body = self._read_json()
         if body is None:
             return
-        event_type = body.get("event_type", "")
-        payload = body.get("payload", {})
-        if not event_type:
-            self._send_error(400, "event_type is required")
+        try:
+            # The body envelope itself consumes one level, so the body
+            # budget is the payload budget plus one.
+            check_depth(body, max_depth=MAX_EVENT_DEPTH + 1, field="body")
+            event_type = body.get("event_type")
+            payload = body.get("payload", {})
+            validate_event_envelope(event_type, payload)
+            validate_event_payload(event_type, payload)
+        except InputValidationError as exc:
+            self._send_error(400, str(exc))
             return
         try:
             self.bridge.push_event(event_type, payload)
@@ -158,6 +215,12 @@ class _WyrdHandler(BaseHTTPRequestHandler):
             self._send_error(400, "Invalid Content-Length header")
             return None
         if length > self.max_request_bytes:
+            # Drain the body (in flat-memory chunks) before answering
+            # 413: closing mid-send gives the client a broken pipe
+            # instead of the 413 it should observe. The drain is
+            # capped — a client declaring gigabytes is abusive, and for
+            # those the connection is closed after the cap.
+            _drain(self.rfile, min(length, _DRAIN_CAP_BYTES))
             self._send_error(413, f"Request body too large (max {self.max_request_bytes} bytes)")
             return None
         raw = self.rfile.read(length)

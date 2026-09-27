@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import operator
 import os
 import sqlite3
 import tempfile
@@ -116,10 +117,14 @@ def quarantine_file(path: str | Path, reason: str = "",
 
 def _read_user_version(conn: sqlite3.Connection) -> int:
     row = conn.execute("PRAGMA user_version").fetchone()
-    return int(row[0]) if row else 0
+    try:
+        return int(row[0]) if row else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def _stamp_version(conn: sqlite3.Connection, version: int) -> None:
+    version = operator.index(version)
     conn.execute(f"PRAGMA user_version={version}")
 
 

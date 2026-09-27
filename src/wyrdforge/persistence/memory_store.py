@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import operator
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -16,6 +17,10 @@ from wyrdforge.models.memory import (
     ObservationRecord,
     PolicyRecord,
     SymbolicTraceRecord,
+)
+from wyrdforge.hardening.input_validation import (
+    fts5_phrase,
+    validate_search_query,
 )
 from wyrdforge.hardening.state_io import open_or_quarantine
 
@@ -134,7 +139,15 @@ class PersistentMemoryStore:
         return False
 
     def incremental_vacuum(self, pages: int = 100) -> None:
-        """Free up to *pages* pages of unused space via incremental vacuum."""
+        """Free up to *pages* pages of unused space via incremental vacuum.
+
+        *pages* is coerced through ``operator.index`` before
+        interpolation — a non-integer here would otherwise reach the
+        SQL text verbatim.
+        """
+        pages = operator.index(pages)
+        if pages < 0:
+            raise ValueError("pages must be >= 0")
         with self._connect() as conn:
             conn.execute(f"PRAGMA incremental_vacuum({pages})")
 
@@ -248,13 +261,16 @@ class PersistentMemoryStore:
         Uses FTS5 for candidate retrieval, then applies the same
         multi-factor scoring as InMemoryRecordStore.
         """
-        terms = [t.lower() for t in query.split() if t.strip()]
+        terms = validate_search_query(query)
         if not terms:
             return []
 
         with self._connect() as conn:
-            # FTS5 candidate retrieval
-            fts_query = " OR ".join(f'"{t}"' for t in terms)
+            # FTS5 candidate retrieval. Every term is rendered as a
+            # phrase with the FTS5-documented quote escape ("" inside
+            # a phrase), so a '"' can never break out of its phrase and
+            # FTS5 operators (OR, NEAR, *, col:) stay literal text.
+            fts_query = " OR ".join(fts5_phrase(t) for t in terms)
             fts_rows = conn.execute(
                 "SELECT record_id FROM memory_fts WHERE memory_fts MATCH ?",
                 (fts_query,),
