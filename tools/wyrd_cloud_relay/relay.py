@@ -24,11 +24,19 @@ Environment variables (alternative to CLI flags):
     WYRD_RELAY_PORT     — port to listen on
     WYRD_RELAY_TOKEN    — bearer token (empty = no auth)
     WYRD_RATE_LIMIT     — requests per minute per token (0 = unlimited)
+    WYRD_CORS_ORIGINS   — comma-separated CORS origins (default: "*";
+                          see the D1 named decision in docs/security.md)
+
+Security posture (D1/D2 rulings, Volmarr 2026-09-26):
+    - Non-loopback bind without a bearer token is refused at startup.
+    - Wildcard CORS ("*") without a bearer token is refused at startup.
+    - Loopback bind without a token starts with a loud stderr warning.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 from collections import defaultdict
 from typing import Optional
@@ -132,16 +140,25 @@ class RelayConfig:
         self.port         = port
         self.tokens       = tokens or []
         self.rate_limit   = rate_limit
+        # The "*" default is a named, dated decision (D1: Volmarr,
+        # 2026-09-26 — docs/security.md): the D&D Beyond browser
+        # extension's chrome-extension://<id> origin is unknowable
+        # before install, so a static narrowed list would be fake
+        # security. Narrow at deploy time with --cors-origins or
+        # WYRD_CORS_ORIGINS; note D2 coupling below — "*" requires
+        # a bearer token.
         self.cors_origins = cors_origins or ["*"]
         self.timeout      = timeout
 
     @classmethod
     def from_env(cls) -> "RelayConfig":
+        cors_raw = os.environ.get("WYRD_CORS_ORIGINS", "")
         return cls(
             upstream_url=os.environ.get("WYRD_UPSTREAM_URL", "http://localhost:8765"),
             port=int(os.environ.get("WYRD_RELAY_PORT", "9000")),
             tokens=[t for t in os.environ.get("WYRD_RELAY_TOKEN", "").split(",") if t],
             rate_limit=int(os.environ.get("WYRD_RATE_LIMIT", "60")),
+            cors_origins=[o.strip() for o in cors_raw.split(",") if o.strip()] or None,
         )
 
     def upstream(self, path: str) -> str:
@@ -154,12 +171,49 @@ class RelayConfig:
                 f"rate_limit={self.rate_limit}/min)")
 
 
-def build_cors_headers(origins: list[str]) -> dict[str, str]:
-    return {
-        "Access-Control-Allow-Origin":  ", ".join(origins) if origins != ["*"] else "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    }
+# ---------------------------------------------------------------------------
+# Startup security posture (D2 ruling, Volmarr 2026-09-26)
+# ---------------------------------------------------------------------------
+
+def _is_loopback_host(host: str) -> bool:
+    """True for binds that stay on this machine."""
+    return host.strip().lower() in ("localhost", "127.0.0.1", "::1")
+
+
+class RelaySecurityError(RuntimeError):
+    """The relay's bind/auth/CORS posture is unsafe — refusing to start."""
+
+
+def check_relay_security(config: RelayConfig, host: str) -> None:
+    """Enforce the D1/D2 coupling at startup.
+
+    - Non-loopback bind (0.0.0.0 included) without tokens → refuse.
+    - Wildcard CORS ("*" present in the origins list) without
+      tokens → refuse. A "*" origin clears preflights for every web
+      page the operator has open, so "*" + no auth is an open
+      world-API proxy; "*" + Bearer <redacted> (tokens are not ambient
+      like cookies). Membership, not equality: Starlette's
+      CORSMiddleware treats "*" anywhere in allow_origins as
+      allow-all, so ["*", "https://x.example"] is wildcard too.
+    - Loopback bind without tokens → loud stderr warning, starts
+      anyway (local dev stays frictionless).
+    """
+    if not _is_loopback_host(host) and not config.tokens:
+        raise RelaySecurityError(
+            f"refusing to bind non-loopback host {host!r} without a "
+            "bearer token: pass --token or set WYRD_RELAY_TOKEN "
+            "(D2 ruling, Volmarr 2026-09-26)")
+    if "*" in config.cors_origins and not config.tokens:
+        raise RelaySecurityError(
+            'refusing wildcard CORS origins ("*" present) without a '
+            "bearer token: pass --token / WYRD_RELAY_TOKEN, or narrow "
+            "origins with --cors-origins / WYRD_CORS_ORIGINS "
+            "(D1+D2 rulings, Volmarr 2026-09-26)")
+    if not config.tokens:
+        print("[WyrdRelay] WARNING: starting without a bearer token — "
+              "anyone who can reach this relay can read and write the "
+              "world API. Keep the bind on localhost, or pass --token.",
+              file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +332,11 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--rate-limit", type=int,
                    default=int(os.environ.get("WYRD_RATE_LIMIT", "60")),
                    help="Requests per minute per token (0 = unlimited)")
+    p.add_argument("--cors-origins",
+                   default=os.environ.get("WYRD_CORS_ORIGINS", ""),
+                   help="Comma-separated CORS origins "
+                        "(default: \"*\" per the D1 named decision, "
+                        "2026-09-26; narrowing requires a token per D2)")
     p.add_argument("--host",   default="0.0.0.0", help="Bind host")
     return p.parse_args()
 
@@ -295,7 +354,14 @@ if __name__ == "__main__":
         port=args.port,
         tokens=[t for t in args.token.split(",") if t],
         rate_limit=args.rate_limit,
+        cors_origins=[o.strip() for o in args.cors_origins.split(",")
+                      if o.strip()] or None,
     )
     print(f"[WyrdRelay] {config}")
+    try:
+        check_relay_security(config, args.host)
+    except RelaySecurityError as exc:
+        print(f"[WyrdRelay] FATAL: {exc}", file=sys.stderr)
+        raise SystemExit(2)
     app = create_app(config)
     uvicorn.run(app, host=args.host, port=args.port)

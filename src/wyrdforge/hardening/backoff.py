@@ -11,9 +11,9 @@ Usage::
     cfg = BackoffConfig(max_attempts=4, base_delay=0.5, max_delay=30.0)
 
     result = retry_with_backoff(
-        lambda: requests.post(url, json=body),
-        config=cfg,
-        retryable=(ConnectionError, TimeoutError),
+        lambda: post_json_to_wyrd(url, body),  # your own HTTP call —
+        config=cfg,                            # `requests` is NOT a
+        retryable=(ConnectionError, TimeoutError),  # wyrdforge dependency
     )
 """
 from __future__ import annotations

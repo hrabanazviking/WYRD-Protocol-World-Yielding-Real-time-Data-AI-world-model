@@ -57,6 +57,13 @@ MAX_SEARCH_TERMS: int = 100
 #: HTTP door field bounds.
 MAX_EVENT_TYPE_CHARS: int = 200
 MAX_QUERY_INPUT_CHARS: int = 200_000
+#: One body cap across every localhost HTTP surface (Track 1, P2):
+#: the same 1 MiB the HTTP bridge has enforced since Slice 3.
+MAX_BODY_BYTES: int = 1 * 1024 * 1024
+#: Cap on how much of an abusive body we drain before answering 413 —
+#: a client declaring gigabytes is abusive, and for those the
+#: connection is closed after the cap.
+DRAIN_CAP_BYTES: int = 64 * 1024 * 1024
 
 
 class InputValidationError(ValueError):
@@ -322,3 +329,59 @@ def fts5_phrase(term: str) -> str:
     operators (``OR``, ``NEAR``, ``*``, ``col:``) stay literal text.
     """
     return '"' + term.replace('"', '""') + '"'
+
+
+# ---------------------------------------------------------------------------
+# Guarded HTTP body reading (Track 1, P2 — shared by every localhost
+# bridge: the HTTP bridge, kindroid, voxta)
+# ---------------------------------------------------------------------------
+
+def drain_limited(rfile, nbytes: int) -> None:
+    """Read and discard *nbytes* from *rfile* in flat-memory chunks.
+
+    Used before answering 413: closing mid-send gives the client a
+    broken pipe instead of the 413 it should observe. The drain is
+    capped — a client declaring gigabytes is abusive, and for those
+    the connection is closed after the cap.
+    """
+    remaining = nbytes
+    while remaining > 0:
+        chunk = rfile.read(min(65536, remaining))
+        if not chunk:
+            break
+        remaining -= len(chunk)
+
+
+def read_guarded_body(
+    headers,
+    rfile,
+    *,
+    max_bytes: int = MAX_BODY_BYTES,
+) -> tuple[bytes | None, tuple[int, str] | None]:
+    """Read an HTTP request body with fail-closed guards.
+
+    *headers* is the request's header mapping (``.get`` is used);
+    *rfile* is the readable body stream.
+
+    Returns ``(raw, None)`` on success, ``(None, (status, message))``
+    on rejection — the caller sends the status with its own sender:
+    - missing/unparseable/negative Content-Length → 400 naming the header
+    - length above *max_bytes* → 413 (the body is drained in
+      flat-memory chunks first, so the client observes the 413
+      instead of a broken pipe)
+    - short read → 400
+    """
+    length_str = headers.get("Content-Length", "0")
+    try:
+        length = int(length_str)
+    except (TypeError, ValueError):
+        return None, (400, "Invalid Content-Length header")
+    if length < 0:
+        return None, (400, "Invalid Content-Length header")
+    if length > max_bytes:
+        drain_limited(rfile, min(length, DRAIN_CAP_BYTES))
+        return None, (413, f"Request body too large (max {max_bytes} bytes)")
+    raw = rfile.read(length)
+    if len(raw) < length:
+        return None, (400, "Request body truncated")
+    return raw, None

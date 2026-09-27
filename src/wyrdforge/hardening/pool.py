@@ -11,8 +11,10 @@ Usage::
 
     pool = BoundedThreadPool(max_workers=16)
 
-    pool.submit(lambda: requests.post(url, json=body))
-    pool.submit(my_push_function, arg1, arg2)
+    pool.submit(lambda: post_json_to_wyrd(url, body))  # your own HTTP
+    pool.submit(my_push_function, arg1, arg2)          # call — `requests`
+                                                      # is NOT a wyrdforge
+                                                      # dependency
 
     # Graceful drain (waits up to timeout seconds for queued tasks)
     pool.shutdown(wait=True, timeout=5.0)

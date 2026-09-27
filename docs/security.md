@@ -78,9 +78,88 @@ naming `query`, never silently truncated.
 does the same — an integer reaches the SQL text, never a raw value.
 All other SQL uses bound parameters throughout.
 
-## What this does NOT cover (Track 1, P2/P3)
+## Exposure inventory (Track 1, P2 — Wave G, Slice 4)
 
-CORS and exposure decisions, the cloud relay, the Kindroid/Voxta
-bridges, dependency and secret audits, and the accepted-risk register
-are separate slices with their own decision gates. This slice is
-input validation only.
+Every HTTP surface, in one place. Probed live by
+`tests/test_exposure_probe.py`.
+
+| Surface | Port | Default bind | Auth | Body handling |
+|---|---|---|---|---|
+| `WyrdHTTPServer` (`bridges/http_api.py`) | 8765 | `localhost` | none (loopback-only) | guarded `Content-Length` → 400; 1 MiB cap → 413 (Slice 3) |
+| voxta (`bridges/voxta_bridge.py`) | 8766 | `localhost` | none (loopback-only) | guarded `Content-Length` → 400; 1 MiB cap → 413 (Slice 4) |
+| kindroid (`bridges/kindroid_bridge.py`) | 8767 | `localhost` | none (loopback-only) | guarded `Content-Length` → 400; 1 MiB cap → 413 (Slice 4) |
+| cloud relay (`tools/wyrd_cloud_relay/relay.py`) | 9000 | `0.0.0.0` | Bearer token (optional — startup refuses unsafe postures without one; see D2) | FastAPI/uvicorn stack |
+
+The three local bridges are loopback-only with no authentication —
+the roadmap's own model ("Bearer tokens and localhost defaults are
+the model"), confirmed and documented here, not rebuilt. The probe
+asserts each default bind resolves to a loopback address only: **0
+unauthenticated write endpoints reachable from off-loopback.**
+
+All three share one body cap — `MAX_BODY_BYTES` = 1 MiB, enforced by
+`read_guarded_body()` in `hardening/input_validation.py` — and one
+rule: garbage `Content-Length` is a 400 naming the header (never a
+silently dropped connection), an over-cap body is a 413 after a
+flat-memory drain (never an unbounded read).
+
+## D1 — CORS origin policy (Volmarr, 2026-09-26)
+
+**Named, dated decision: the relay keeps CORS `*` as its default.**
+
+Why not a narrowed static list: the named browser client is the
+D&D Beyond *extension*, whose origin is `chrome-extension://<id>` —
+unknowable before install. A static allowlist
+(`https://www.owlbear.rodeo`, …) would not cover it, so narrowing
+would be fake security that breaks the documented happy path.
+
+The narrowing mechanism exists anyway, so the decision stays
+operational: `--cors-origins` / `WYRD_CORS_ORIGINS`
+(comma-separated) on the relay. The dead `build_cors_headers`
+helper (whose multi-origin branch emitted an invalid
+`Access-Control-Allow-Origin`) was deleted; `CORSMiddleware` is the
+live path.
+
+## D2 — relay authentication coupling (Volmarr, 2026-09-26)
+
+The relay **refuses to start** (`RelaySecurityError`, exit 2) when:
+- the bind host is not loopback (`0.0.0.0` included) and no bearer
+  token is configured (`--token` / `WYRD_RELAY_TOKEN`), or
+- CORS origins include `"*"` (membership, not equality — Starlette
+  treats `"*"` anywhere in the list as allow-all) and no bearer
+  token is configured —
+  `*` clears preflights for every web page the operator has open,
+  so `*` + no auth would be an open world-API proxy. (`*` + Bearer
+  is safe: tokens are not ambient like cookies.)
+
+Loopback bind without a token starts anyway, with a loud stderr
+warning — local development stays frictionless.
+
+The gate runs in the CLI entrypoint; programmatic use of
+`create_app()` skips it — the deployer's responsibility.
+
+## Dependency & secret hygiene (Track 1, P3 — Wave G, Slice 4)
+
+- pip-audit, 2026-09-26: **0 known vulnerabilities** across the
+  installed set. Dated record:
+  `docs/audits/dependency-audit-2026-09-26.md`.
+- Secret scan (tree + full git history), 2026-09-26: **0 real
+  secrets**; two inert placeholders documented in the audit record.
+- D3 standing policy (Volmarr, 2026-09-26): `sentence-transformers`
+  and `sqlalchemy` are **excluded** — nothing in the tree imports
+  them, and the `[llm]`/`[full]` extras that declared them were
+  removed from `pyproject.toml`. Every remaining dependency carries
+  a one-line justification comment.
+- Proxy-env posture: every HTTP client bypasses proxy env vars for
+  localhost traffic — the relay via `httpx(trust_env=False)`, the
+  Ollama connector via a proxy-bypassing opener for loopback
+  targets (non-loopback targets keep normal proxy behavior).
+  `tools/wyrd_tui.py` also uses `urlopen` with proxy env, but its
+  world-load path is separately broken and out of this slice's
+  scope — noted, not fixed.
+
+## What this does NOT cover
+
+Sandboxing component code and any new auth system (OAuth, user
+management) are roadmap non-goals — deliberately not built. The
+local bridges' no-auth loopback model is confirmed above, not
+rebuilt.

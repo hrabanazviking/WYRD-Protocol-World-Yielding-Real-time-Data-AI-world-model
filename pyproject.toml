@@ -9,29 +9,28 @@ description = "WYRD Protocol — World-Yielding Real-time Data AI World Model"
 readme = "README.md"
 license = { text = "CC BY 4.0" }
 requires-python = ">=3.10"
+# Per-dependency justification (Track 1, P3 — Wave G Slice 4):
 dependencies = [
-    "pydantic>=2.0",
-    "pyyaml>=6.0",
+    "pydantic>=2.0",   # entity/world models, TruthMeta — core
+    "pyyaml>=6.0",     # world-file YAML loading — core
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.23",
-    "ruff>=0.4",
-    "mypy>=1.9",
+    "pytest>=7.0",          # test suite
+    "pytest-asyncio>=0.23", # async relay/bridge tests
+    "ruff>=0.4",            # lint
+    "mypy>=1.9",            # type checking
 ]
-llm = [
-    "sentence-transformers",
-    "sqlalchemy>=2.0",
-]
-full = [
-    "sentence-transformers",
-    "sqlalchemy>=2.0",
-    "fastapi",
-    "uvicorn",
-    "click",
-]
+# NOTE — no [llm] / [full] extras, by standing policy (D3 ruling,
+# Volmarr 2026-09-26): sentence-transformers buys zero functionality
+# (nothing in the tree imports it — verified 2026-09-26) and
+# sqlalchemy is likewise unimported; the extras were the only path
+# that could reinstall them by accident ("pip install .[full]").
+# The relay's web deps (fastapi/uvicorn/httpx) are NOT declared here
+# either — install separately per tools/wyrd_cloud_relay/relay.py
+# ("pip install fastapi uvicorn httpx"); the relay degrades
+# gracefully without them.
 
 [tool.setuptools.packages.find]
 where = ["src"]

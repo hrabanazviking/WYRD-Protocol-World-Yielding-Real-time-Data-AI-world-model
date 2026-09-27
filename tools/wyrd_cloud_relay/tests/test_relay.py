@@ -14,7 +14,8 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 from tools.wyrd_cloud_relay.relay import (
-    RateLimiter, TokenValidator, RelayConfig, build_cors_headers
+    RateLimiter, TokenValidator, RelayConfig, RelaySecurityError,
+    check_relay_security, _is_loopback_host,
 )
 from tools.wyrd_tui import (
     normalize_persona_id,
@@ -162,9 +163,28 @@ class TestRelayConfig:
         c = RelayConfig(upstream_url="http://example.com:8765")
         assert c.upstream("/query") == "http://example.com:8765/query"
 
-    def test_cors_default_wildcard(self):
+    def test_cors_default_wildcard_named_decision(self):
+        # D1 ruling (Volmarr, 2026-09-26): "*" stays the default by
+        # name and date — the D&D Beyond extension's
+        # chrome-extension://<id> origin is unknowable before install,
+        # so a static narrowed list would be fake security.
         c = RelayConfig()
-        assert "*" in c.cors_origins
+        assert c.cors_origins == ["*"]
+
+    def test_cors_origins_explicit(self):
+        c = RelayConfig(cors_origins=["https://www.owlbear.rodeo"])
+        assert c.cors_origins == ["https://www.owlbear.rodeo"]
+
+    def test_cors_origins_from_env(self, monkeypatch):
+        monkeypatch.setenv("WYRD_CORS_ORIGINS",
+                           "https://a.example, https://b.example")
+        c = RelayConfig.from_env()
+        assert c.cors_origins == ["https://a.example", "https://b.example"]
+
+    def test_cors_origins_env_empty_means_default(self, monkeypatch):
+        monkeypatch.delenv("WYRD_CORS_ORIGINS", raising=False)
+        c = RelayConfig.from_env()
+        assert c.cors_origins == ["*"]
 
     def test_repr_contains_key_info(self):
         c = RelayConfig(upstream_url="http://example.com", port=9001,
@@ -183,21 +203,61 @@ class TestRelayConfig:
 
 
 # ===========================================================================
-# build_cors_headers
+# Startup security posture — D2 (Volmarr, 2026-09-26)
 # ===========================================================================
 
-class TestBuildCorsHeaders:
-    def test_wildcard(self):
-        h = build_cors_headers(["*"])
-        assert h["Access-Control-Allow-Origin"] == "*"
+class TestIsLoopbackHost:
+    def test_loopbacks(self):
+        for h in ("localhost", "127.0.0.1", "::1", "LOCALHOST"):
+            assert _is_loopback_host(h)
 
-    def test_specific_origins(self):
-        h = build_cors_headers(["https://example.com"])
-        assert "example.com" in h["Access-Control-Allow-Origin"]
+    def test_non_loopbacks(self):
+        for h in ("0.0.0.0", "192.168.1.10", "example.com", ""):
+            assert not _is_loopback_host(h)
 
-    def test_methods_present(self):
-        h = build_cors_headers(["*"])
-        assert "POST" in h["Access-Control-Allow-Methods"]
+
+class TestCheckRelaySecurity:
+    def test_non_loopback_without_token_refused(self):
+        c = RelayConfig(tokens=[])
+        with pytest.raises(RelaySecurityError, match="WYRD_RELAY_TOKEN"):
+            check_relay_security(c, "0.0.0.0")
+
+    def test_lan_bind_without_token_refused(self):
+        c = RelayConfig(tokens=[])
+        with pytest.raises(RelaySecurityError):
+            check_relay_security(c, "192.168.1.10")
+
+    def test_non_loopback_with_token_allowed(self):
+        c = RelayConfig(tokens=["t"])
+        check_relay_security(c, "0.0.0.0")  # no raise
+
+    def test_wildcard_cors_without_token_refused(self):
+        # D1+D2 coupling: "*" clears preflights for every open page,
+        # so "*" + no auth is refused even on loopback.
+        c = RelayConfig(tokens=[], cors_origins=["*"])
+        with pytest.raises(RelaySecurityError, match="wildcard CORS"):
+            check_relay_security(c, "127.0.0.1")
+
+    def test_wildcard_in_list_without_token_refused(self):
+        # Starlette treats "*" anywhere in allow_origins as
+        # allow-all, so ["*", "https://x.example"] is wildcard too
+        # and must be refused the same way.
+        c = RelayConfig(tokens=[],
+                        cors_origins=["*", "https://x.example"])
+        with pytest.raises(RelaySecurityError, match="wildcard CORS"):
+            check_relay_security(c, "127.0.0.1")
+
+    def test_wildcard_with_token_allowed(self):
+        c = RelayConfig(tokens=["t"], cors_origins=["*"])
+        check_relay_security(c, "127.0.0.1")  # no raise
+
+    def test_loopback_narrowed_without_token_warns_and_starts(self, capsys):
+        c = RelayConfig(tokens=[],
+                        cors_origins=["https://www.owlbear.rodeo"])
+        check_relay_security(c, "localhost")  # no raise
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.err
+        assert "--token" in captured.err
 
 
 # ===========================================================================

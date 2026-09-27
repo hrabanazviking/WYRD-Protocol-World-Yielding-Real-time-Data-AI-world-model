@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 from wyrdforge.bridges.python_rpg import BridgeConfig, PythonRPGBridge
+from wyrdforge.hardening.input_validation import read_guarded_body
 
 
 class VoxtaWyrdBridge:
@@ -155,8 +156,11 @@ class _VoxtaHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Not found"}, 404)
 
     def _handle_voxta(self) -> None:
-        length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length)
+        raw, rejection = read_guarded_body(self.headers, self.rfile)
+        if rejection is not None:
+            status, message = rejection
+            self._send_json({"error": message}, status)
+            return
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:

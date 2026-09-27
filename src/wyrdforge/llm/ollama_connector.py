@@ -9,6 +9,7 @@ Raises:
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import urllib.error
 import urllib.request
@@ -25,6 +26,25 @@ class OllamaUnavailableError(OllamaError):
 
 class OllamaResponseError(OllamaError):
     """Ollama returned an unexpected response."""
+
+
+def _is_loopback_target(host: str) -> bool:
+    """True when *host* names this machine's loopback interface.
+
+    Case/whitespace/bracket tolerant, and covers every loopback
+    address form (``127.x.x.x``, ``::1`` and its full expansion):
+    a misclassified loopback would route local Ollama traffic
+    through the proxy env — the failure mode this seam exists to
+    kill. Unknown or non-loopback hosts fail closed toward normal
+    proxy behavior.
+    """
+    h = host.strip().lower()
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h.strip("[]")).is_loopback
+    except ValueError:
+        return False
 
 
 class OllamaConnector:
@@ -50,6 +70,20 @@ class OllamaConnector:
         self.model = model
         self.timeout = timeout
 
+    def _urlopen(self, req: Request, timeout: float):
+        """Open *req*, bypassing proxy env vars for loopback targets.
+
+        With HTTP(S)_PROXY set, a bare ``urlopen()`` would route even
+        localhost Ollama traffic through the proxy (the 2026-09-25
+        relay failure mode). Non-loopback targets keep normal proxy
+        behavior.
+        """
+        if _is_loopback_target(self.host):
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}))
+            return opener.open(req, timeout=timeout)
+        return urllib.request.urlopen(req, timeout=timeout)
+
     @property
     def base_url(self) -> str:
         return f"http://{self.host}:{self.port}"
@@ -62,7 +96,7 @@ class OllamaConnector:
         """Return True if the Ollama server is reachable."""
         try:
             req = Request(f"{self.base_url}/api/tags")
-            with urllib.request.urlopen(req, timeout=5):
+            with self._urlopen(req, timeout=5):
                 return True
         except Exception:
             return False
@@ -75,7 +109,7 @@ class OllamaConnector:
         """
         try:
             req = Request(f"{self.base_url}/api/tags")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with self._urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 return [m["name"] for m in data.get("models", [])]
         except urllib.error.URLError as e:
@@ -122,7 +156,7 @@ class OllamaConnector:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with self._urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 return data["message"]["content"]
         except urllib.error.URLError as e:
