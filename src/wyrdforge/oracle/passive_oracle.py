@@ -18,6 +18,7 @@ Nine query methods:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from wyrdforge.ecs.components.character import FactionComponent
@@ -50,6 +51,8 @@ from wyrdforge.oracle.models import (
     WorldContextPacket,
 )
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
+
+logger = logging.getLogger(__name__)
 
 
 class PassiveOracle:
@@ -420,20 +423,31 @@ class PassiveOracle:
                         region_id = anc.entity_id
                 path_ids.append(anc.entity_id)
         else:
-            # Walk parents manually
+            # Walk parents manually (no YggdrasilTree available).
+            # Guarded against parent-chain cycles: a revisited node id
+            # terminates the walk instead of hanging.
             current = node_id
             chain: list[str] = []
+            seen: set[str] = {node_id}
             while True:
                 parent_comp = self._world.get_component(current, "parent")
                 if not isinstance(parent_comp, ParentComponent) or not parent_comp.parent_entity_id:
                     break
                 parent_id = parent_comp.parent_entity_id
+                if parent_id in seen:
+                    logger.warning(
+                        "PassiveOracle: parent-chain cycle detected at %r — "
+                        "terminating walk",
+                        parent_id,
+                    )
+                    break
                 # Determine level of current node
                 if parent_comp.hierarchy_level == HierarchyLevel.REGION:
                     region_id = current
                 elif parent_comp.hierarchy_level == HierarchyLevel.ZONE:
                     zone_id = current
                 chain.append(parent_id)
+                seen.add(parent_id)
                 current = parent_id
             path_ids = list(reversed(chain))
 

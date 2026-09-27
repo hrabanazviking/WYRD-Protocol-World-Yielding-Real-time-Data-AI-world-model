@@ -584,3 +584,146 @@ class TestMemoryStoreHardening:
 # Import guard for re module used in normalization tests
 # ---------------------------------------------------------------------------
 import re
+
+
+# ===========================================================================
+# Watchdog bounded restarts (Wave G Slice 5 — Track 4 P1)
+# ===========================================================================
+
+import logging as _logging
+
+from wyrdforge.bridges import http_api as _http_api_module
+from wyrdforge.bridges.http_api import WyrdHTTPServer
+
+
+class _ScriptedServer:
+    """Stand-in for _ThreadingHTTPServer with a scripted crash state.
+
+    The watchdog detects a crash via the ``_BaseServer__shutdown_request``
+    flag (the literal attribute name http.server uses after mangling).
+    Each health-check consumes the next script entry; exhausted script
+    defaults to ``default`` (crashed). ``serve_forever`` returns
+    immediately — the fake is already "dead", the flag is what the
+    watchdog reads.
+    """
+
+    def __init__(self, script: list, default: bool = True):
+        self._script = script
+        self._default = default
+
+    @property
+    def _BaseServer__shutdown_request(self):  # noqa: N802 (literal name the watchdog reads)
+        if self._script:
+            return self._script.pop(0)
+        return self._default
+
+    def serve_forever(self):
+        return None
+
+
+def _watchdog_harness(script, default: bool = True):
+    """Build a WyrdHTTPServer whose restarts are scripted fakes.
+
+    Returns (server, calls, factory) where calls counts
+    _ThreadingHTTPServer instantiations (i.e. restarts performed).
+    """
+    server = WyrdHTTPServer.__new__(WyrdHTTPServer)
+    server._stopped = threading.Event()
+    server._watchdog_interval = 0.02
+    server._watchdog_backoff = BackoffConfig(
+        max_attempts=4, base_delay=0.01, max_delay=0.05, jitter=0.0
+    )
+    server._watchdog_failures = 0
+    server._host = "localhost"
+    server._port = 0
+    server._handler_cls = object
+    server._server = _ScriptedServer(script, default=default)
+    calls: list = []
+
+    def factory(*args, **kwargs):
+        calls.append(1)
+        return _ScriptedServer(script, default=default)
+
+    return server, calls, factory
+
+
+class TestWatchdogBoundedRestarts:
+    def _run_watchdog(self, server, factory, join_timeout: float = 10.0):
+        with patch.object(_http_api_module, "_ThreadingHTTPServer", side_effect=factory):
+            thread = threading.Thread(target=server._watchdog_loop, daemon=True)
+            thread.start()
+            thread.join(timeout=join_timeout)
+        return thread
+
+    def test_crash_loop_reaches_terminal_state(self, caplog):
+        server, calls, factory = _watchdog_harness([])
+        with caplog.at_level(_logging.CRITICAL, logger="wyrdforge.bridges.http_api"):
+            thread = self._run_watchdog(server, factory)
+        assert not thread.is_alive(), "watchdog thread did not exit after terminal state"
+        # 4 consecutive crashes -> 4 restarts; the 5th detection stops.
+        assert len(calls) == 4
+        assert any("STOPPED" in r.message for r in caplog.records)
+        assert any("manual intervention" in r.message for r in caplog.records)
+
+    def test_healthy_check_resets_failure_budget(self, caplog):
+        # crash, crash, HEALTHY (reset), then 4 straight crashes -> terminal
+        # only after 4 *consecutive* crashes. Without the reset the 5th
+        # check would already be terminal with 4 restarts total.
+        server, calls, factory = _watchdog_harness(
+            [True, True, False, True, True, True, True, True]
+        )
+        with caplog.at_level(_logging.CRITICAL, logger="wyrdforge.bridges.http_api"):
+            thread = self._run_watchdog(server, factory)
+        assert not thread.is_alive()
+        assert len(calls) == 6, f"expected 6 restarts (2 + 4 after reset), got {len(calls)}"
+        assert any("STOPPED" in r.message for r in caplog.records)
+
+    def test_transient_crash_still_restarts(self):
+        # One crash among healthy checks: restarts once, keeps watching.
+        server, calls, factory = _watchdog_harness([True], default=False)
+        thread = self._run_watchdog(server, factory, join_timeout=1.0)
+        # The watchdog is still watching (no terminal state on this script);
+        # stop it ourselves.
+        assert thread.is_alive()
+        server._stopped.set()
+        thread.join(timeout=10.0)
+        assert not thread.is_alive()
+        assert len(calls) == 1
+
+    def test_restart_delays_grow(self):
+        delays: list = []
+        orig_delay_for = BackoffConfig.delay_for
+
+        def spy(self, attempt):
+            d = orig_delay_for(self, attempt)
+            delays.append(d)
+            return d
+
+        server, calls, factory = _watchdog_harness([])
+        with patch.object(BackoffConfig, "delay_for", spy):
+            self._run_watchdog(server, factory)
+        assert delays == [0.01, 0.02, 0.04, 0.05], delays
+
+    def test_start_background_restores_watchdog_budget(self, monkeypatch):
+        # Terminal stop leaves _watchdog_failures at 5. The operator's
+        # start_background() must restore the full restart budget —
+        # otherwise the first post-intervention crash would CRITICAL-stop
+        # with zero restarts, and the "manual intervention required"
+        # recovery path would be broken.
+        server, calls, factory = _watchdog_harness([])
+        thread = self._run_watchdog(server, factory)
+        assert not thread.is_alive()
+        assert len(calls) == 4
+        assert server._watchdog_failures == 5  # terminal state consumed it
+
+        # Restart through the real entry point (socket factory stubbed).
+        server._watchdog = True
+        server._watchdog_interval = 60.0  # watchdog parks; we assert state only
+        monkeypatch.setattr(_http_api_module, "_ThreadingHTTPServer", factory)
+        bg = server.start_background()
+        try:
+            assert server._watchdog_failures == 0
+        finally:
+            server._stopped.set()
+            bg.join(timeout=10.0)
+        assert not bg.is_alive()

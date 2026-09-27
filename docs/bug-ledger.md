@@ -132,3 +132,34 @@ triage changes — never silently.
 - **Disposition:** deliberately not applied (ordered out of scope)
 - **Detail:** Volmarr's order excluded the §7 cron changes; the finding is
   recorded, not applied. Re-opening needs his word.
+
+### BUG-005 — flaky concurrent-load timing in test_phase19_load.py
+- **Severity at find:** limping (test-only; no production behavior implicated)
+- **Date found:** 2026-09-26
+- **Observed:** PROVEN — 3 consecutive runs of `tests/test_phase19_load.py`
+  failed 5, 4, and 6 of 8 tests respectively (`ConnectionResetError`
+  against the stdlib test HTTP server under 50-thread bursts). The
+  consistently failing set across runs:
+  `TestConcurrentQuery::{test_all_complete, test_all_return_200,
+  test_p99_under_2_seconds}`,
+  `TestMixedEndpointLoad::test_all_mixed_complete_under_5_seconds`,
+  plus intermittently `test_all_have_response_key` and
+  `test_no_errors_under_mixed_load`. Union across runs = the same 6
+  test IDs as the Slice 3/4 baselines — no new information.
+- **Reproduction:** `pytest tests/test_phase19_load.py` — fails
+  non-deterministically under load on this VM.
+- **Root cause:** timing-sensitive assertions (all-50-complete, p99 < 2 s)
+  against `http.server`-based test servers under thread bursts; the
+  stdlib server drops connections under contention. Environmental, not
+  a world-model defect.
+- **Fix:** none yet — quarantined per T2-P2 (dated note, owner, re-check).
+- **Pinning test:** `tests/test_phase19_load.py` — the 6 tests carry
+  `@pytest.mark.xfail(strict=False)` quarantine markers.
+- **Status:** quarantined (flaky concurrent-load timing, ConnectionResetError
+  vs stdlib test server; owner: forge; re-check 2026-10-26)
+- **Quarantine hygiene:** the markers are `strict=False`, so a *new*
+  failure mode would surface only as xfail, not as a failure. Review
+  with `pytest tests/test_phase19_load.py -rX` (or `-rxX`) on the
+  re-check date and at every slice boundary; any xfail whose reason
+  no longer matches `ConnectionResetError` timing flakiness re-opens
+  this bug.

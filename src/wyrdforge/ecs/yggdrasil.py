@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from wyrdforge.ecs.components.identity import NameComponent
 from wyrdforge.ecs.components.spatial import (
     ContainerComponent,
@@ -9,6 +11,8 @@ from wyrdforge.ecs.components.spatial import (
 )
 from wyrdforge.ecs.entity import Entity
 from wyrdforge.ecs.world import World
+
+logger = logging.getLogger(__name__)
 
 
 class YggdrasilTree:
@@ -176,14 +180,29 @@ class YggdrasilTree:
         ]
 
     def get_ancestors(self, entity_id: str) -> list[Entity]:
-        """Return the chain of parent spatial nodes from entity up to zone."""
+        """Return the chain of parent spatial nodes from entity up to zone.
+
+        Guards against parent-chain cycles (malformed world data): a
+        revisited entity id terminates the walk with a warning instead
+        of hanging. Acyclic chains walk exactly as before.
+        """
         ancestors: list[Entity] = []
+        seen: set[str] = {entity_id}
         parent_comp = self._world.get_component(entity_id, "parent")
         while parent_comp and isinstance(parent_comp, ParentComponent) and parent_comp.parent_entity_id:
-            parent = self._world.get_entity(parent_comp.parent_entity_id)
+            next_id = parent_comp.parent_entity_id
+            if next_id in seen:
+                logger.warning(
+                    "YggdrasilTree.get_ancestors: parent-chain cycle detected "
+                    "at %r — terminating walk",
+                    next_id,
+                )
+                break
+            parent = self._world.get_entity(next_id)
             if parent is None:
                 break
             ancestors.append(parent)
+            seen.add(next_id)
             parent_comp = self._world.get_component(parent.entity_id, "parent")
         return ancestors
 

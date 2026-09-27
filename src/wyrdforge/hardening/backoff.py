@@ -1,8 +1,9 @@
 """backoff.py — Exponential back-off with jitter for retryable operations.
 
-Used by bridge fire-and-forget push loops and any code that makes HTTP calls
-to WyrdHTTPServer and needs graceful retry behaviour when the server is busy
-or temporarily unreachable.
+Used by the WyrdHTTPServer watchdog (``bridges/http_api.py``) to space out
+server restarts after a crash, and by any code that needs graceful retry
+behaviour with backoff and jitter when a dependency is temporarily
+unreachable.
 
 Usage::
 

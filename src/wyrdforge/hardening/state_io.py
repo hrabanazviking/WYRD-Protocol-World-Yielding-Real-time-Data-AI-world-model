@@ -182,7 +182,7 @@ def open_state_db(
     existed = path.exists()
     conn = None
     try:
-        conn = sqlite3.connect(str(path))
+        conn = sqlite3.connect(str(path), timeout=5.0)  # explicit: Python's default busy timeout
         # Cheap smoke: SELECT 1 is a no-op, but reading user_version
         # forces SQLite to parse the database header — that is what
         # actually rejects garbage bytes.
