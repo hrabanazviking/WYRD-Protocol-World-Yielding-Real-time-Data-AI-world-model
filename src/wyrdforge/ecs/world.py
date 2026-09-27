@@ -99,6 +99,53 @@ class World:
         self._components[entity_id][comp_type] = component
         self._comp_type_index[comp_type].add(entity_id)
 
+    def create_entity_with_component(
+        self,
+        *,
+        entity_id: str,
+        tags: set[str] | None = None,
+        component: Component,
+        stamp: datetime | None = None,
+    ) -> Entity:
+        """Create an entity and attach one component in a single pass.
+
+        Exactly equivalent to ``create_entity(entity_id=entity_id,
+        tags=tags)`` followed by ``add_component(entity_id,
+        component)`` — minus the redundant re-lookup between the two.
+        The component keeps whatever timestamps it was constructed
+        with. Carries the same guards with the same errors: duplicate
+        entity id → ``ValueError``; component ``entity_id`` mismatch →
+        ``ValueError``. ``tags`` is copied, exactly like
+        :meth:`create_entity`.
+
+        ``stamp``: when provided, one shared wall-clock stamp assigned
+        to both ``created_at`` and ``updated_at`` (Volmarr-authorized
+        2026-09-27: the microsecond differences between the default
+        factories' separate reads are implementation noise, not a
+        contract). When None, the dataclass default factories do their
+        own reads, exactly like :meth:`create_entity`.
+        """
+        if entity_id in self._entities:
+            raise ValueError(f"Entity '{entity_id}' already exists in this world")
+        if component.entity_id != entity_id:
+            raise ValueError(
+                f"Component entity_id '{component.entity_id}' does not match target '{entity_id}'"
+            )
+        if stamp is None:
+            entity = Entity(entity_id=entity_id, tags=set(tags or []))
+        else:
+            entity = Entity(
+                entity_id=entity_id, tags=set(tags or []),
+                created_at=stamp, updated_at=stamp,
+            )
+        self._entities[entity_id] = entity
+        for tag in entity.tags:
+            self._tag_index[tag].add(entity_id)
+        comp_type = component.component_type
+        self._components[entity_id][comp_type] = component
+        self._comp_type_index[comp_type].add(entity_id)
+        return entity
+
     def get_component(self, entity_id: str, component_type: str) -> Component | None:
         return self._components.get(entity_id, {}).get(component_type)
 

@@ -19,9 +19,9 @@ component level.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr, computed_field
 
 from wyrdforge.ecs.component import Component, register_component
 from wyrdforge.models.common import StrictModel
@@ -62,18 +62,76 @@ class Belief(StrictModel):
 
 @register_component
 class BeliefComponent(Component):
-    """What this entity believes about the world (rightly or wrongly)."""
+    """What this entity believes about the world (rightly or wrongly).
+
+    Beliefs are keyed by subject; insertion order *is* belief order — a
+    revised belief moves to the end, exactly as the old
+    remove-then-append did. The private ``_ordered`` dict is the single
+    store, so lookup and revision are O(1) instead of linear scans (T3
+    SLICE6-F1: the old scans made feed replay quadratic). The public
+    ``beliefs`` list is a view over it, so readers, iteration order,
+    and JSON serialization are unchanged.
+    """
 
     _type_key: ClassVar[str] = "beliefs"
     component_type: Literal["beliefs"] = "beliefs"
 
-    beliefs: list[Belief] = Field(default_factory=list)
+    _ordered: dict[str, Belief] = PrivateAttr(default_factory=dict)
+
+    def __copy__(self) -> "BeliefComponent":
+        # The _ordered store is mutated in place by update_belief /
+        # retract_belief, so a shallow copy must get its own dict —
+        # otherwise mutating the copy corrupts the original. (The old
+        # list implementation rebound self.beliefs on every write, so it
+        # was copy-safe; this restores that property.)
+        new = super().__copy__()
+        new._ordered = dict(self._ordered)
+        return new
+
+    @computed_field
+    @property
+    def beliefs(self) -> list[Belief]:
+        """Beliefs in insertion order (a revised belief moves to the end)."""
+        return list(self._ordered.values())
+
+    @classmethod
+    def model_validate(
+        cls,
+        obj: Any,
+        *,
+        strict: bool | None = None,
+        from_attributes: bool | None = None,
+        context: Any | None = None,
+    ) -> "BeliefComponent":
+        # Accept the stored {"beliefs": [...]} shape (world_store
+        # round-trip). The public "beliefs" is a computed view over the
+        # private _ordered store, so validate the remaining fields
+        # normally and seed _ordered directly. (A mode="before"
+        # validator cannot return an instance in this pydantic
+        # version — it fails model_type validation.)
+        if isinstance(obj, dict) and "beliefs" in obj:
+            data = dict(obj)
+            raw = data.pop("beliefs")
+            inst = super().model_validate(
+                data, strict=strict,
+                from_attributes=from_attributes, context=context,
+            )
+            ordered: dict[str, Belief] = {}
+            for item in raw:
+                b = (item if isinstance(item, Belief)
+                     else Belief.model_validate(item))
+                if b.subject in ordered:
+                    del ordered[b.subject]
+                ordered[b.subject] = b
+            inst._ordered = ordered
+            return inst
+        return super().model_validate(
+            obj, strict=strict,
+            from_attributes=from_attributes, context=context,
+        )
 
     def get_belief(self, subject: str) -> Belief | None:
-        for b in self.beliefs:
-            if b.subject == subject:
-                return b
-        return None
+        return self._ordered.get(subject)
 
     def update_belief(self, subject: str, claim: str, confidence: float,
                       source: BeliefSource) -> Belief:
@@ -81,16 +139,16 @@ class BeliefComponent(Component):
         history honest: the old belief is replaced, not merged."""
         belief = Belief(subject=subject, claim=claim,
                         confidence=confidence, source=source)
-        self.beliefs = [b for b in self.beliefs if b.subject != subject]
-        self.beliefs.append(belief)
+        if subject in self._ordered:
+            del self._ordered[subject]
+        self._ordered[subject] = belief
         self.touch()
         return belief
 
     def retract_belief(self, subject: str) -> bool:
         """Drop a belief. Returns True if one was held."""
-        before = len(self.beliefs)
-        self.beliefs = [b for b in self.beliefs if b.subject != subject]
-        if len(self.beliefs) != before:
+        if subject in self._ordered:
+            del self._ordered[subject]
             self.touch()
             return True
         return False

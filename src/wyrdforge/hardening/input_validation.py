@@ -85,6 +85,31 @@ class InputValidationError(ValueError):
 # Primitive checks
 # ---------------------------------------------------------------------------
 
+#: Node budget for the envelope fast-path walk below. Past this many
+#: visited nodes the walk bails to the exact measurement — the walk
+#: itself must never become the bomb it guards against.
+_ENVELOPE_WALK_BUDGET: int = 100_000
+
+
+def _resolve_path(field: str, link: Any) -> str:
+    """Rebuild the dotted field path from a lazy parent-link chain.
+
+    Called only when raising — the walk itself never builds strings.
+    ``link`` is None for the root, else ``(parent_link, is_dict, key)``.
+    Produces exactly the ``parent.key`` / ``parent[idx]`` shapes the old
+    eager version built.
+    """
+    if link is None:
+        return field
+    parts: list[str] = []
+    while link is not None:
+        parent, is_dict, key = link
+        parts.append(f".{key}" if is_dict else f"[{key}]")
+        link = parent
+    parts.reverse()
+    return field + "".join(parts)
+
+
 def check_depth(obj: Any, *, max_depth: int, field: str = "$") -> None:
     """Reject objects nested deeper than *max_depth*.
 
@@ -98,38 +123,44 @@ def check_depth(obj: Any, *, max_depth: int, field: str = "$") -> None:
     an exponentially large — or cyclic — object graph. Without the
     budget, *this walk* would be the bomb. Over-budget walks are
     rejected naming the field.
+
+    T3 SLICE6-F1 floor work: the walk is string-free — the old code
+    rebuilt the full dotted path for every visited node (O(depth^2)
+    string copying); paths are now parent-link chains resolved only
+    when raising. Same traversal order, same raise conditions, same
+    path strings in the errors.
     """
-    # Stack of (value, depth, path). Breadth here is bounded by the
+    # Stack of (value, depth, link): link is None for the root, else
+    # (parent_link, is_dict, key). Breadth here is bounded by the
     # caller's size cap; depth is what we police — and the walk
     # itself is budgeted against alias-shared/cyclic graphs.
-    stack: list[tuple[Any, int, str]] = [(obj, 0, field)]
+    stack: list[tuple[Any, int, Any]] = [(obj, 0, None)]
     visits = 0
     while stack:
-        value, depth, path = stack.pop()
+        value, depth, link = stack.pop()
         if isinstance(value, dict):
-            items = list(value.items())
+            is_dict = True
+            items = value.items()
         elif isinstance(value, (list, tuple)):
-            items = list(enumerate(value))
+            is_dict = False
+            items = enumerate(value)
         else:
             continue
         child_depth = depth + 1
         if child_depth > max_depth:
             raise InputValidationError(
-                path, f"nesting depth exceeds {max_depth}"
+                _resolve_path(field, link),
+                f"nesting depth exceeds {max_depth}",
             )
         for key, child in items:
             visits += 1
             if visits > MAX_VALIDATE_WALK_NODES:
                 raise InputValidationError(
-                    path,
+                    _resolve_path(field, link),
                     f"node walk exceeds {MAX_VALIDATE_WALK_NODES} nodes — "
-                    f"possible alias bomb or cyclic document",
+                    "possible alias bomb or cyclic document",
                 )
-            if isinstance(value, dict):
-                child_path = f"{path}.{key}"
-            else:
-                child_path = f"{path}[{key}]"
-            stack.append((child, child_depth, child_path))
+            stack.append((child, child_depth, (link, is_dict, key)))
 
 
 def check_string(
@@ -161,11 +192,286 @@ def check_id(value: Any, *, field: str) -> str:
 
 def _serialized_bytes(payload: Any) -> int:
     try:
-        return len(json.dumps(payload, default=str).encode("utf-8"))
+        # T3 SLICE6-F1: json.dumps defaults to ensure_ascii=True, so the
+        # output is pure ASCII and len(str) == len(utf-8 bytes) exactly —
+        # the .encode("utf-8") was a redundant second pass over the
+        # string. Same number, one pass fewer.
+        return len(json.dumps(payload, default=str))
     except (TypeError, ValueError):
         # Not JSON-serializable at all — the depth walk below still
         # applies; size is unmeasurable, treat as over the cap.
         return MAX_EVENT_BYTES + 1
+
+
+#: Bound on the size fast-path walk below: past this many visited nodes
+#: the walk bails to the exact ``json.dumps`` measurement. The walk
+#: itself must never become the bomb it guards against.
+_SIZE_WALK_BUDGET: int = 100_000
+
+
+def _fits_byte_cap(payload: Any, max_bytes: int) -> bool:
+    """Rigorous upper bound on ``len(json.dumps(payload, default=str))``.
+
+    Returns True only when the serialized form *certainly* fits within
+    *max_bytes* — then the caller may skip the exact ``json.dumps``
+    measurement entirely. Returns False when the bound is inconclusive
+    (large, exotic, or hostile payload): the caller falls back to the
+    exact measurement, so the accept/reject verdict is identical
+    either way. This is a pure fast path — it can only say "definitely
+    fits" or "measure exactly", never "definitely over".
+
+    The bound mirrors CPython's default ``json.dumps``
+    (``ensure_ascii=True``, separators ``", "`` / ``": "``): every
+    scalar contributes a provable maximum, containers add their exact
+    framing bytes. Anything the bound cannot model — exotic values
+    (where ``default=str`` would apply or ``dumps`` would raise),
+    exotic keys, or a walk past the node budget — bails to the exact
+    path instead of guessing.
+    """
+    total = 0
+    stack = [payload]
+    visits = 0
+    while stack:
+        value = stack.pop()
+        visits += 1
+        if visits > _SIZE_WALK_BUDGET:
+            return False
+        if total > max_bytes:
+            # Inconclusive — the exact measurement decides.
+            return False
+        if value is None:
+            total += 4  # null
+        elif value is True:
+            total += 4  # true
+        elif value is False:
+            total += 5  # false
+        elif isinstance(value, str):
+            # ensure_ascii=True: the worst case per char is an astral
+            # character → surrogate pair (12 chars); every char costs
+            # at most 12, plus the two quotes.
+            total += 12 * len(value) + 2
+        elif isinstance(value, int):
+            try:
+                total += len(str(value))
+            except (TypeError, ValueError):
+                # e.g. the >4300-digit int→str limit: dumps raises the
+                # same way — let the exact path reproduce it.
+                return False
+        elif isinstance(value, float):
+            if value != value:  # NaN → "NaN" (repr would say "nan")
+                total += 3
+            elif value == float("inf"):  # → "Infinity"
+                total += 8
+            elif value == float("-inf"):  # → "-Infinity"
+                total += 9
+            else:
+                total += len(repr(value))
+        elif isinstance(value, dict):
+            # '{' + '"k": v, ...' + '}': 2 framing + 2 per item (': ')
+            # + 2 per separator (', ').
+            n = len(value)
+            total += 2 + 2 * n + (2 * (n - 1) if n else 0)
+            for k, v in value.items():
+                # JSON keys are str/int/float/bool/None only — anything
+                # else makes dumps raise TypeError (→ over the cap);
+                # bail so the exact path reproduces that.
+                if isinstance(k, str):
+                    total += 12 * len(k) + 2
+                elif k is None:
+                    total += 4
+                elif k is True:
+                    total += 4
+                elif k is False:
+                    total += 5
+                elif isinstance(k, int):
+                    try:
+                        total += len(str(k))
+                    except (TypeError, ValueError):
+                        return False
+                elif isinstance(k, float):
+                    if k != k:
+                        total += 3
+                    elif k == float("inf"):
+                        total += 8
+                    elif k == float("-inf"):
+                        total += 9
+                    else:
+                        total += len(repr(k))
+                else:
+                    return False
+                if total > max_bytes:
+                    return False
+                stack.append(v)
+        elif isinstance(value, (list, tuple)):
+            # '[' + 'v, ...' + ']': 2 framing + 2 per separator.
+            n = len(value)
+            total += 2 + (2 * (n - 1) if n else 0)
+            for v in value:
+                stack.append(v)
+        else:
+            # Exotic value (object, set, bytes, ...): dumps would apply
+            # default=str or raise — the exact path decides, identically.
+            return False
+    return total <= max_bytes
+
+
+def _serialized_within_cap(payload: Any, max_bytes: int) -> bool:
+    """Exact size gate: True iff the payload's serialized form fits.
+
+    Equivalent to ``len(json.dumps(payload, default=str)) <= max_bytes``
+    — the upper-bound fast path skips the ``json.dumps`` measurement for
+    ordinary payloads, and anything inconclusive falls through to the
+    exact measurement. The verdict is identical to measuring every time;
+    only the work is less.
+    """
+    if _fits_byte_cap(payload, max_bytes):
+        return True
+    try:
+        # T3 SLICE6-F1: json.dumps defaults to ensure_ascii=True, so the
+        # output is pure ASCII and len(str) == len(utf-8 bytes) exactly —
+        # no second .encode("utf-8") pass over the string.
+        return len(json.dumps(payload, default=str)) <= max_bytes
+    except (TypeError, ValueError):
+        # Not JSON-serializable at all — unmeasurable size is treated
+        # as over the cap, exactly as before.
+        return False
+
+
+def _walk_envelope(payload: Any, *, max_bytes: int, max_depth: int,
+                   field: str) -> bool:
+    """Single-traversal fast path for the envelope's size cap + depth limit.
+
+    Returns True when the payload *definitely* satisfies both — the
+    caller is done, no ``json.dumps``, no second walk. Returns False
+    when the walk is inconclusive (an exotic value, the bound exceeded,
+    or the node budget exceeded): the caller falls back to the exact
+    ``json.dumps`` measurement plus :func:`check_depth`, which
+    reproduce the two-pass accept/reject behavior exactly.
+
+    Raises :class:`InputValidationError` for a depth violation — but
+    only after the size bound completes within the cap, because the
+    size error takes precedence over the depth error, exactly as when
+    the size check and the depth check ran as separate passes. (The
+    walk continues past a recorded depth violation solely to finish
+    the size bound; that only happens for payloads rejected either
+    way.)
+
+    The bound is an *upper* bound, so ``bound > max_bytes`` never
+    proves the payload is over the cap — it only proves the fast path
+    is inconclusive, hence ``return False`` rather than raising.
+    """
+    bound = 0
+    # The first depth violation's parent-link chain. A separate flag is
+    # needed because the root's own link is None — "violation at the
+    # root" must not look like "no violation".
+    depth_violated = False
+    depth_link: Any = None
+    stack: list[tuple[Any, int, Any]] = [(payload, 0, None)]
+    visits = 0
+    push = stack.append
+    while stack:
+        value, depth, link = stack.pop()
+        visits += 1
+        if visits > _ENVELOPE_WALK_BUDGET:
+            return False
+        if bound > max_bytes:
+            # Inconclusive (the bound over-estimates) — exact path decides.
+            return False
+        if value is None:
+            bound += 4  # null
+        elif value is True:
+            bound += 4  # true
+        elif value is False:
+            bound += 5  # false
+        elif isinstance(value, str):
+            # ensure_ascii=True: worst case per char is an astral
+            # character → surrogate pair (12 chars), plus the quotes.
+            bound += 12 * len(value) + 2
+        elif isinstance(value, int):
+            try:
+                bound += len(str(value))
+            except (TypeError, ValueError):
+                return False
+        elif isinstance(value, float):
+            if value != value:  # NaN → "NaN"
+                bound += 3
+            elif value == float("inf"):  # → "Infinity"
+                bound += 8
+            elif value == float("-inf"):  # → "-Infinity"
+                bound += 9
+            else:
+                bound += len(repr(value))
+        elif isinstance(value, dict):
+            # '{' + '"k": v, ...' + '}': 2 framing + 2 per item (': ')
+            # + 2 per separator (', ').
+            n = len(value)
+            bound += 2 + 2 * n + (2 * (n - 1) if n else 0)
+            child_depth = depth + 1
+            if child_depth > max_depth and not depth_violated:
+                # This container sits too deep: record its path, but keep
+                # walking — the size bound must complete for precedence.
+                depth_violated = True
+                depth_link = link
+            for k, v in value.items():
+                # JSON keys are str/int/float/bool/None only — anything
+                # else makes dumps raise TypeError; bail to the exact path.
+                if isinstance(k, str):
+                    bound += 12 * len(k) + 2
+                elif k is None:
+                    bound += 4
+                elif k is True:
+                    bound += 4
+                elif k is False:
+                    bound += 5
+                elif isinstance(k, int):
+                    try:
+                        bound += len(str(k))
+                    except (TypeError, ValueError):
+                        return False
+                elif isinstance(k, float):
+                    if k != k:
+                        bound += 3
+                    elif k == float("inf"):
+                        bound += 8
+                    elif k == float("-inf"):
+                        bound += 9
+                    else:
+                        bound += len(repr(k))
+                else:
+                    return False
+                if bound > max_bytes:
+                    return False
+                push((v, child_depth, (link, True, k)))
+        elif isinstance(value, (list, tuple)):
+            # '[' + 'v, ...' + ']': 2 framing + 2 per separator.
+            n = len(value)
+            bound += 2 + (2 * (n - 1) if n else 0)
+            child_depth = depth + 1
+            if child_depth > max_depth and not depth_violated:
+                depth_violated = True
+                depth_link = link
+            for i, v in enumerate(value):
+                if bound > max_bytes:
+                    return False
+                push((v, child_depth, (link, False, i)))
+        else:
+            # Exotic value (object, set, bytes, ...): dumps would apply
+            # default=str or raise — the exact path decides, identically.
+            return False
+    if bound > max_bytes:
+        # Inconclusive (the bound over-estimates) — the exact path
+        # decides. Checked here too, not just at the top of the loop:
+        # the last value processed may be what pushes the bound over.
+        return False
+    if depth_violated:
+        # The bound completed within the cap, so the size is definitely
+        # fine — the recorded depth violation is the verdict, with the
+        # same path the depth walk would have reported.
+        raise InputValidationError(
+            _resolve_path(field, depth_link),
+            f"nesting depth exceeds {max_depth}",
+        )
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +505,16 @@ def validate_event_envelope(
             "payload",
             f"must be a JSON object, got {type(payload).__name__}",
         )
-    if _serialized_bytes(payload) > max_bytes:
+    # T3 SLICE6-F1 floor work: the size cap and the depth limit are
+    # enforced in a SINGLE traversal (_walk_envelope) instead of two
+    # (_serialized_within_cap + check_depth). Same errors, same
+    # precedence (size before depth), one walk instead of two.
+    if _walk_envelope(payload, max_bytes=max_bytes, max_depth=max_depth,
+                      field="payload"):
+        return payload
+    # Inconclusive fast path — exact measurement plus the depth walk,
+    # reproducing the two-pass accept/reject behavior exactly.
+    if not _serialized_within_cap(payload, max_bytes):
         raise InputValidationError(
             "payload", f"exceeds {max_bytes} bytes serialized"
         )

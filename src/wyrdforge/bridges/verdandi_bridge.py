@@ -194,6 +194,7 @@ Incident record: docs/incident-record.md. Bug ledger: docs/bug-ledger.md.
 """
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import os
@@ -206,7 +207,7 @@ from pydantic import Field
 
 from wyrdforge.ecs.component import Component, register_component
 from wyrdforge.ecs.components.temporal import TemporalAnchorComponent
-from wyrdforge.ecs.components.theory_of_mind import Belief, BeliefComponent
+from wyrdforge.ecs.components.theory_of_mind import BeliefComponent
 from wyrdforge.ecs.world import World
 from wyrdforge.hardening.input_validation import (
     MAX_DESCRIPTION_CHARS,
@@ -472,8 +473,9 @@ class VerdandiBridge:
         )
         self_entity = self.world.create_entity(
             entity_id=SELF_ID, tags={"self", "ai"})
+        self._belief_comp = BeliefComponent(entity_id=SELF_ID)
         self.world.add_component(
-            SELF_ID, BeliefComponent(entity_id=SELF_ID))
+            SELF_ID, self._belief_comp)
         # The entity ledger: the one mutable file in a pure-projection
         # system (see module docstring). It carries only *accrual* no
         # other source provides — last sense statuses (for transition
@@ -491,6 +493,14 @@ class VerdandiBridge:
         # [{metric, old, new, at}]. Projected into the mirror so the
         # inbound watch can announce them without reading the ledger.
         self._sense_transitions: list[dict] = []
+        # T3 SLICE6-F1: the event-type -> handler map is built once here,
+        # not on every apply_event call (it was 1.7µs of per-event cost).
+        self._event_handlers: dict = self._build_handlers()
+        # T3 SLICE6-F1: anchor entity ids. uuid4 was 3.7µs per anchor —
+        # the ids are opaque (nothing parses them), so a per-run
+        # counter replaces it. Unique within this bridge's run, which
+        # is the only scope the ids ever live in.
+        self._anchor_seq: int = 0
 
     def set_ledger(self, ledger: dict | None) -> None:
         """Point the bridge at the runner's ledger (accrual reference)."""
@@ -579,7 +589,7 @@ class VerdandiBridge:
         """
         if not isinstance(event_type, str):
             return None
-        handler = self._handlers().get(event_type)
+        handler = self._event_handlers.get(event_type)
         if handler is None:
             return None
         guarded = self._guard_data(data)
@@ -610,6 +620,10 @@ class VerdandiBridge:
         return data
 
     def _handlers(self) -> dict:
+        """The event-type -> handler map (built once in __init__)."""
+        return self._event_handlers
+
+    def _build_handlers(self) -> dict:
         return {
             "mood_shift": self._mood_shift,
             "wish_made": self._wish_made,
@@ -649,47 +663,76 @@ class VerdandiBridge:
         same way a malformed event is.
         """
         fresh = VerdandiBridge()
-        for entry in events:
-            if not isinstance(entry, dict):
-                continue
-            fresh.apply_event(entry.get("type", ""),
-                              entry.get("data", {}),
-                              entry.get("_ts"))
+        # T3 SLICE6-F1: replay is a batch — it allocates tens of
+        # thousands of entities/components the world keeps alive.
+        # Running the cyclic collector mid-batch just burns cycles
+        # (measured ~6µs/event at 20k); defer it until the batch is
+        # done. try/finally: an exception mid-replay must never leave
+        # the collector disabled process-wide.
+        gc.disable()
+        try:
+            for entry in events:
+                if not isinstance(entry, dict):
+                    continue
+                fresh.apply_event(entry.get("type", ""),
+                                  entry.get("data", {}),
+                                  entry.get("_ts"))
+        finally:
+            gc.enable()
         return fresh
 
     # -- internals ------------------------------------------------------
     def _beliefs(self) -> BeliefComponent:
-        comp = self.world.get_component(SELF_ID, "beliefs")
-        if comp is None:  # pragma: no cover — created in __init__
-            comp = BeliefComponent(entity_id=SELF_ID)
-            self.world.add_component(SELF_ID, comp)
-        return comp
+        return self._belief_comp
 
     def _add_belief(self, subject: str, claim: str,
                     confidence: float, source: str = "observed") -> None:
         subject = _bounded(subject, 500)
-        beliefs = self._beliefs()
-        existing = beliefs.get_belief(subject)
-        if existing is not None:
-            beliefs.beliefs.remove(existing)
-        beliefs.beliefs.append(Belief(
-            subject=subject, claim=_bounded(claim),
-            confidence=confidence, source=source))
-        beliefs.touch()
+        # T3-P2 SLICE6-F1 fix: delegate to the component's indexed
+        # update_belief. Same semantics as the old get+remove+append
+        # (drop same-subject, append the fresh belief at the end, touch)
+        # without the two linear scans and the list.remove() Pydantic
+        # __eq__ storm.
+        self._beliefs().update_belief(
+            subject, _bounded(claim), confidence,
+            source,  # type: ignore[arg-type] — Belief validates BeliefSource
+        )
 
     def _add_anchor(self, label: str, at: datetime,
                     *, past: bool = False, tags: set[str] | None = None) -> str:
-        entity = self.world.create_entity(
-            tags={"anchor", "unnr"} | set(tags or ()))
+        # T3 SLICE6-F1: anchor ids are a per-run counter, not uuid4
+        # (uuid4 was 3.7µs per anchor; the ids are opaque — nothing
+        # parses them — so a counter is equivalent here).
+        self._anchor_seq += 1
+        eid = f"anchor-{self._anchor_seq:08d}"
+        # T3 SLICE6-F1: build the tag set in place — the old
+        # {"anchor", "unnr"} | set(tags or ()) allocated three sets
+        # (literal, set(), union) before Entity copied it a fourth time.
+        anchor_tags = {"anchor", "unnr"}
+        if tags:
+            anchor_tags.update(tags)
+        # T3 SLICE6-F1 floor work: single-pass world registration via
+        # create_entity_with_component (was create_entity +
+        # add_component with a redundant re-lookup between them).
+        # Volmarr-authorized 2026-09-27: ONE wall-clock read shared by
+        # all four timestamps (entity created/updated, component
+        # created/updated) — was four separate default-factory reads.
+        # The microsecond differences are implementation noise, not a
+        # contract; the meaning ("when the anchor was created") is
+        # unchanged.
+        now = datetime.now(timezone.utc)
         anchor = TemporalAnchorComponent(
-            entity_id=entity.entity_id,
+            entity_id=eid,
             valid_from=at,
             valid_until=at if past else None,
             observed_at=at,
             label=label,
+            created_at=now,
+            updated_at=now,
         )
-        self.world.add_component(entity.entity_id, anchor)
-        return entity.entity_id
+        self.world.create_entity_with_component(
+            entity_id=eid, tags=anchor_tags, component=anchor, stamp=now)
+        return eid
 
     # -- mapped events ---------------------------------------------------
     def _mood_shift(self, data: dict, at: datetime) -> str:
