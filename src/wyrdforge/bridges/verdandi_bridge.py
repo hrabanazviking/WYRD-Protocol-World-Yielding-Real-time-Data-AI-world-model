@@ -110,7 +110,7 @@ this run can detect transitions) and ``reflection_seen``
 never republished within 24h). Delete the ledger and the mirror loses
 only transition-detection and reflection dedup — both degrade
 gracefully and self-heal within a run or two. The ledger is a
-convenience, not a foundation.
+convenience, not a foundation. (Standing rule — Track 6, Incident 4.)
 
 **Senses bypass the nerve.** Machine telemetry (memory headroom, hub
 liveness, queue depth, feed rate, the quiet-window clock) is sampled by
@@ -181,6 +181,16 @@ Deliberately unmapped, kept from the original audit: ``ping``,
 ``wyrd_divergence_resolved`` (the consciousness watch's own output —
 the mirror does not watch itself watching), ``probe_recorded``. And
 there are no ``sense_*`` nerve events, ever (see above).
+
+**Standing rules (Track 6).**
+Incident 2 — the 19:55 mid-edit read: this module is imported by the
+1-minute heartbeat worker. NEVER edit it in place while the worker runs.
+Stage the new version in /tmp, syntax-check it (python -m py_compile),
+then os.rename it over this path. Readers see the old file or the new
+file — never a half-written one.
+Incident 4 — no load-bearing state in mutable convenience files: the
+ledger paragraph above states it ("a convenience, not a foundation").
+Incident record: docs/incident-record.md. Bug ledger: docs/bug-ledger.md.
 """
 from __future__ import annotations
 
