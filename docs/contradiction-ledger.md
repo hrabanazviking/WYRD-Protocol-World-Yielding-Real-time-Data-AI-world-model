@@ -81,3 +81,75 @@ asking "what pattern of wrongness keeps recurring?"
 ## Entries
 
 _Entries begin 2026-09-27, when the ledger-append wiring went live. Nothing is invented here._
+
+### CONTRADICTION-001 — sense:mem_available_mib:ok->warn
+- **Date fired:** 2026-09-27 19:24 UTC
+- **Divergence kind:** sense_transition
+- **What the model believed:** sense 'mem_available_mib' status 'ok'
+- **What reality said:** sense 'mem_available_mib' status 'warn'
+- **Domain rule applied:** event-domain: the live event wins
+- **What changed:** logged only (no belief stepped)
+- **Status:** resolved 2026-09-27
+
+### CONTRADICTION-002 — sense:mem_available_mib:warn->ok
+- **Date fired:** 2026-09-27 19:25 UTC
+- **Divergence kind:** sense_transition
+- **What the model believed:** sense 'mem_available_mib' status 'warn'
+- **What reality said:** sense 'mem_available_mib' status 'ok'
+- **Domain rule applied:** event-domain: the live event wins
+- **What changed:** logged only (no belief stepped)
+- **Status:** resolved 2026-09-27
+
+### CONTRADICTION-003 — sense:hub_liveness:ok->warn
+- **Date fired:** 2026-09-27 20:22 UTC
+- **Divergence kind:** sense_transition
+- **What the model believed:** sense 'hub_liveness' status 'ok'
+- **What reality said:** sense 'hub_liveness' status 'warn'
+- **Domain rule applied:** event-domain: the live event wins
+- **What changed:** logged only (no belief stepped)
+- **Status:** resolved 2026-09-27
+
+### CONTRADICTION-004 — sense:hub_liveness:warn->ok
+- **Date fired:** 2026-09-27 20:23 UTC
+- **Divergence kind:** sense_transition
+- **What the model believed:** sense 'hub_liveness' status 'warn'
+- **What reality said:** sense 'hub_liveness' status 'ok'
+- **Domain rule applied:** event-domain: the live event wins
+- **What changed:** logged only (no belief stepped)
+- **Status:** resolved 2026-09-27
+
+### CONTRADICTION-005 — sense:mem_available_mib:warn->red
+- **Date fired:** 2026-09-30 17:37 UTC
+- **Divergence kind:** sense_transition
+- **What the model believed:** sense 'mem_available_mib' status 'warn'
+- **What reality said:** sense 'mem_available_mib' status 'red'
+- **Domain rule applied:** event-domain: the live event wins
+- **What changed:** logged only (no belief stepped)
+- **Status:** resolved 2026-09-30
+
+### CONTRADICTION-006 — sense:mem_available_mib:red->warn
+- **Date fired:** 2026-09-30 17:41 UTC
+- **Divergence kind:** sense_transition
+- **What the model believed:** sense 'mem_available_mib' status 'red'
+- **What reality said:** sense 'mem_available_mib' status 'warn'
+- **Domain rule applied:** event-domain: the live event wins
+- **What changed:** logged only (no belief stepped)
+- **Status:** resolved 2026-09-30
+
+### CONTRADICTION-007 — sense:mem_available_mib:warn->red
+- **Date fired:** 2026-09-30 18:51 UTC
+- **Divergence kind:** sense_transition
+- **What the model believed:** sense 'mem_available_mib' status 'warn'
+- **What reality said:** sense 'mem_available_mib' status 'red'
+- **Domain rule applied:** event-domain: the live event wins
+- **What changed:** logged only (no belief stepped)
+- **Status:** resolved 2026-09-30
+
+### CONTRADICTION-008 — sense:mem_available_mib:red->ok
+- **Date fired:** 2026-09-30 21:22 UTC
+- **Divergence kind:** sense_transition
+- **What the model believed:** sense 'mem_available_mib' status 'red'
+- **What reality said:** sense 'mem_available_mib' status 'ok'
+- **Domain rule applied:** event-domain: the live event wins
+- **What changed:** logged only (no belief stepped)
+- **Status:** resolved 2026-09-30
