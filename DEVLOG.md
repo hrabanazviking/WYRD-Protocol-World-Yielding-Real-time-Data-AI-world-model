@@ -5,6 +5,77 @@ repository. Newest entries first. (README.md is Volmarr's alone — never edited
 
 ---
 
+## 2026-10-10 — Dusk forge run: "Rúnakefli — Inner-Communications Weave"
+**Run:** wyrd-protocol-dusk-forge (scheduled 18:33 EDT, retried 19:42 EDT) · **Branch:** `development`
+**Theme:** inner-communications — a typed, thread-safe in-process event fabric (the EventBus),
+wired opt-in into the real producers and consumers. Note: this was a retry run. The 18:33
+attempt died on a transient runtime error leaving 15 slices uncommitted in the tree; tonight's
+run audited, completed, and committed them (no work discarded, nothing double-forged).
+
+### Slices (20/20)
+1. **EventEnvelope + topic registry** (new `runtime/events.py`) — immutable-ish StrictModel
+   envelope (topic/payload/source/seq/issued_at/turn_id, attribute + mapping access);
+   dotted topic names registered before use, wildcard patterns rejected.
+2. **subscribe / unsubscribe / publish** — token-based subscriptions, synchronous
+   in-order delivery (exact then wildcard, each in subscription order); `publish()` returns
+   successful-delivery count, never raises on subscriber errors.
+3. **Payload-type enforcement** — per-topic pydantic/dataclass schema validation; violations
+   raise `TypeError` naming the topic.
+4. **Subscriber error isolation** — raising subscribers are logged, recorded in the internal
+   failure drain (`_take_failures()`), remaining subscribers still receive the event.
+5. **Thread safety + FIFO** — one `RLock` guards all mutable state; per-topic FIFO by the
+   bus-scoped `seq` counter; subscribers may publish/(un)subscribe re-entrantly.
+6. **Bounded dead-letter queue** — oldest dropped on overflow (default cap 256, configurable).
+7. **Replay ring buffer** — opt-in per-topic buffer; new subscribers backfill FIFO before live
+   delivery (wildcards merge across topics by seq).
+8. **Per-topic metrics** — `snapshot()` with published/delivered/failed/live subscriber_count,
+   mutation-safe; `reset_metrics()` zeroes counters.
+9. **Wildcard subscriptions** — `"world.*"` prefix match (never matches bare prefix); exact +
+   wildcard both fire; unsubscribe removes only that subscription.
+10. **`close()` shutdown** — idempotent; publish/subscribe/register raise `RuntimeError("bus closed")`;
+    state cleared but topic registry retained.
+11. **World wiring** (`ecs/world.py`) — `world.entity_created/removed`, `world.component_added/removed`.
+12. **TurnLoop wiring** (`runtime/turn_loop.py`) — `turn.started` (before oracle), `turn.completed`
+    (always, even degraded), `turn_id` threaded through envelopes.
+13. **WritebackEngine wiring** (`services/writeback_engine.py`) — `writeback.written` / `writeback.replay`.
+14. **PersistentMemoryStore wiring** (`persistence/memory_store.py`) — `memory.observation_added` /
+    `memory.fact_added` on true inserts only (re-adds and reads silent).
+15. **ContradictionDetector wiring** (`services/contradiction_detector.py`) — `contradiction.detected`
+    (count + fact_ids).
+16. **`state.quarantined`** (`hardening/state_io.py`) — `quarantine_file(..., bus=)` emits the event
+    after the move, with path/dest/reason/detail; bus errors never disturb a quarantine.
+17. **Turn-loop soak assertions** — 3 turns → 6 envelopes, `turn.started(seq k)` before
+    `turn.completed(seq k+1)`, `turn_id` threaded, wildcard capture, failing subscriber mid-soak
+    isolated without disturbing any turn.
+18. **ContradictionAuditConsumer** (new `services/bus_consumers.py`) — subscribes `contradiction.*`,
+    persists one contradiction-audit observation per detection (seq/count/fact_ids/issued_at).
+19. **ReplayPersistenceBridge** (`services/bus_consumers.py`) — attaches with `replay=True`, persists
+    backlog envelopes in seq order with per-(topic, seq) dedupe. Both consumers write through
+    internal UNWIRED stores — a bus-wired store would feed `memory.*` events back into the bus
+    (documented event-storm guard).
+20. **Dead-letter observability** (`runtime/events.py`) — `dead_letter_summary()` (counts by
+    topic + error_type) and `take_dead_letters()` (drain), the queue's monitoring surface.
+    Slices 16 and 20 landed in the coordinator's own batch; slices 17–19 by the worker.
+
+Wiring law for every slice: `bus=None` (the default everywhere) preserves the exact old behavior;
+bus trouble never breaks the underlying operation (producers swallow publish errors).
+
+### Verification
+- Full suite: **PYTHONPATH=src /tmp/wyrdvenv2/bin/python -m pytest tests/ -q -p no:cacheprovider --ignore=tests/test_scale_limits.py**
+- **1760 passed, 14 skipped, 6 xfailed, 1 FAILED** — the failure is the known flaky timing test
+  `test_b1_feed_replay_within_budget` (22.9µs/event vs 20µs budget under load; documented in the
+  dawn entry; NOT retuned per standing rule).
+- New dusk tests: 125 (bus core 32, bus features 45, wiring_a 24, wiring_b 24) — all green.
+- Mid-run environmental incident: /tmp (512M tmpfs) filled by leftover worker test scratch
+  (wyrd-dusk-w* + pytest-of-root); cleared the disposable scratch, re-ran full suite green.
+  Not a code defect.
+
+### Push
+- Committed in 3 batches (A: bus core 1–10+20, B: producer wiring 11–16, C: consumers 17–19);
+  pushed to `origin/development`; verified `git ls-remote origin development` equals local HEAD.
+
+---
+
 ## 2026-10-10 — Dawn forge run: "Helheim Hardening — the resilience weave"
 **Run:** wyrd-protocol-dawn-forge (scheduled 06:33 EDT) · **Branch:** `development`
 **Theme:** stability, robustness, self-healing, error correction, fault isolation,
