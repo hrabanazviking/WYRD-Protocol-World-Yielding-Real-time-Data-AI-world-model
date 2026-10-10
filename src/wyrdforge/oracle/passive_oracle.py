@@ -285,74 +285,34 @@ class PassiveOracle:
         # Entities present at location
         present_entities = self.who_is_here(effective_loc_id) if effective_loc_id else []
 
-        # Canonical facts for all focus entities
+        # --- Memory-layer content (MIMIR / ORLOG / HUGIN / WYRD) ---
+        # Helheim Hardening: the memory/belief layer is wrapped in a single
+        # try/except so a failing store degrades the packet to a world-only
+        # bundle instead of raising.  ECS-derived identity fields above stay
+        # intact; only memory-derived lists empty out.  Exactly one warning
+        # is logged per degraded packet.
         canonical_facts: dict[str, list[FactSummary]] = {}
-        for eid in focus_entity_ids:
-            facts = self.get_facts(eid)
-            if facts:
-                canonical_facts[eid] = [
-                    FactSummary(
-                        record_id=f.record_id,
-                        subject_id=f.content.structured_payload.fact_subject_id,
-                        fact_key=f.content.structured_payload.fact_key,
-                        fact_value=f.content.structured_payload.fact_value,
-                        confidence=f.truth.confidence,
-                        domain=f.content.structured_payload.domain,
-                        # Track 7: confidence now has consequences. Sub-0.3
-                        # facts render uncertain with history; >= 0.3 renders
-                        # exactly as before. This is the only writer-to-reader
-                        # path: SelfCorrectionService writes
-                        # TruthMeta.confidence_history; this packet reads it.
-                        uncertain=is_uncertain(f.truth.confidence),
-                        confidence_history=list(f.truth.confidence_history),
-                    )
-                    for f in facts
-                ]
-
-        # Policies
         policies: list[PolicySummary] = []
-        if include_policies:
-            policy_records = self._store.list_by_record_type(
-                "policy", store=StoreName.ORLOG.value
-            )
-            for r in policy_records:
-                if isinstance(r, PolicyRecord) and r.governance.allowed_for_runtime:
-                    p = r.content.structured_payload
-                    policies.append(PolicySummary(
-                        record_id=r.record_id,
-                        title=r.content.title,
-                        rule_text=p.rule_text,
-                        policy_kind=p.policy_kind,
-                        priority=p.priority,
-                    ))
-            policies.sort(key=lambda p: p.priority)
-
-        # Recent observations
         observations: list[ObservationSummary] = []
-        if include_observations:
-            obs_all = self._store.all(store=StoreName.HUGIN.value)
-            obs_typed = [r for r in obs_all if isinstance(r, ObservationRecord)]
-            obs_typed.sort(
-                key=lambda r: r.content.structured_payload.observed_at,
-                reverse=True,
+        open_contradiction_count = 0
+        try:
+            canonical_facts = self._fetch_canonical_facts(focus_entity_ids)
+            if include_policies:
+                policies = self._fetch_active_policies()
+            if include_observations:
+                observations = self._fetch_recent_observations(max_observations)
+            open_contradiction_count = self._count_open_contradictions()
+        except Exception as exc:  # noqa: BLE001 — resilience: degrade, don't raise
+            logger.warning(
+                "PassiveOracle: memory layer failed during build_context_packet "
+                "(%s: %s) — returning world-only packet with empty "
+                "recent_observations / canonical_facts",
+                type(exc).__name__, exc,
             )
-            for r in obs_typed[:max_observations]:
-                observations.append(ObservationSummary(
-                    record_id=r.record_id,
-                    title=r.content.title,
-                    summary=r.content.summary,
-                    observed_at=r.content.structured_payload.observed_at,
-                ))
-
-        # Open contradictions (count only — no detector dependency)
-        contra_records = self._store.list_by_record_type(
-            "contradiction", store=StoreName.WYRD.value
-        )
-        open_contradiction_count = sum(
-            1 for r in contra_records
-            if isinstance(r, ContradictionRecord)
-            and r.content.structured_payload.resolution_state == "open"
-        )
+            canonical_facts = {}
+            policies = []
+            observations = []
+            open_contradiction_count = 0
 
         formatted = self._render_for_llm(
             focus_entities=focus_entities,
@@ -380,6 +340,84 @@ class PassiveOracle:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _fetch_canonical_facts(
+        self, focus_entity_ids: list[str]
+    ) -> dict[str, list[FactSummary]]:
+        """Canonical facts for all focus entities (MIMIR layer)."""
+        canonical_facts: dict[str, list[FactSummary]] = {}
+        for eid in focus_entity_ids:
+            facts = self.get_facts(eid)
+            if facts:
+                canonical_facts[eid] = [
+                    FactSummary(
+                        record_id=f.record_id,
+                        subject_id=f.content.structured_payload.fact_subject_id,
+                        fact_key=f.content.structured_payload.fact_key,
+                        fact_value=f.content.structured_payload.fact_value,
+                        confidence=f.truth.confidence,
+                        domain=f.content.structured_payload.domain,
+                        # Track 7: confidence now has consequences. Sub-0.3
+                        # facts render uncertain with history; >= 0.3 renders
+                        # exactly as before. This is the only writer-to-reader
+                        # path: SelfCorrectionService writes
+                        # TruthMeta.confidence_history; this packet reads it.
+                        uncertain=is_uncertain(f.truth.confidence),
+                        confidence_history=list(f.truth.confidence_history),
+                    )
+                    for f in facts
+                ]
+        return canonical_facts
+
+    def _fetch_active_policies(self) -> list[PolicySummary]:
+        """Runtime-allowed policies, ascending priority (ORLOG layer)."""
+        policies: list[PolicySummary] = []
+        policy_records = self._store.list_by_record_type(
+            "policy", store=StoreName.ORLOG.value
+        )
+        for r in policy_records:
+            if isinstance(r, PolicyRecord) and r.governance.allowed_for_runtime:
+                p = r.content.structured_payload
+                policies.append(PolicySummary(
+                    record_id=r.record_id,
+                    title=r.content.title,
+                    rule_text=p.rule_text,
+                    policy_kind=p.policy_kind,
+                    priority=p.priority,
+                ))
+        policies.sort(key=lambda p: p.priority)
+        return policies
+
+    def _fetch_recent_observations(
+        self, max_observations: int
+    ) -> list[ObservationSummary]:
+        """Newest observations first (HUGIN layer)."""
+        observations: list[ObservationSummary] = []
+        obs_all = self._store.all(store=StoreName.HUGIN.value)
+        obs_typed = [r for r in obs_all if isinstance(r, ObservationRecord)]
+        obs_typed.sort(
+            key=lambda r: r.content.structured_payload.observed_at,
+            reverse=True,
+        )
+        for r in obs_typed[:max_observations]:
+            observations.append(ObservationSummary(
+                record_id=r.record_id,
+                title=r.content.title,
+                summary=r.content.summary,
+                observed_at=r.content.structured_payload.observed_at,
+            ))
+        return observations
+
+    def _count_open_contradictions(self) -> int:
+        """Count of unresolved contradictions (WYRD layer, count only)."""
+        contra_records = self._store.list_by_record_type(
+            "contradiction", store=StoreName.WYRD.value
+        )
+        return sum(
+            1 for r in contra_records
+            if isinstance(r, ContradictionRecord)
+            and r.content.structured_payload.resolution_state == "open"
+        )
 
     def _entity_summary(self, entity_id: str) -> EntitySummary | None:
         entity = self._world.get_entity(entity_id)

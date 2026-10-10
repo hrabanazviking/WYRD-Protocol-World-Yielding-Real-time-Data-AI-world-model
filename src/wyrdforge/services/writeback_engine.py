@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -76,7 +77,17 @@ class WritebackEngine:
 
     In Phase 2, input is structured dicts (not raw LLM text).
     Phase 4 will add an LLM-output parser that feeds this engine.
+
+    Helheim Hardening: process_turn supports idempotent replays.  When an
+    idempotency_key is supplied, the result of the first call is cached in a
+    bounded in-memory record (OrderedDict capped at
+    ``IDEMPOTENCY_RECORD_CAP`` entries, oldest evicted first).  A repeat
+    call with the same key returns the cached result — identical record ids
+    — without writing new records to the stores.
     """
+
+    #: Cap on the in-memory idempotency record: bounds replay memory.
+    IDEMPOTENCY_RECORD_CAP = 1024
 
     def __init__(
         self,
@@ -88,6 +99,8 @@ class WritebackEngine:
         self._store = store
         self._tenant_id = default_tenant_id
         self._system_id = default_system_id
+        # idempotency_key -> {"observations": [...], "facts": [...]} (record lists)
+        self._idempotency: OrderedDict[str, dict[str, list]] = OrderedDict()
 
     # ------------------------------------------------------------------
     # Observation (HUGIN)
@@ -305,6 +318,7 @@ class WritebackEngine:
         participants: list[str] | None = None,
         place_id: str | None = None,
         facts: list[dict] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, list]:
         """Write a full conversation turn to memory stores.
 
@@ -318,10 +332,26 @@ class WritebackEngine:
             place_id:      Location entity ID where this turn occurred.
             facts:         Optional list of dicts, each with:
                            {fact_subject_id, fact_key, fact_value, confidence?, domain?}
+            idempotency_key: Optional caller-supplied key.  If a key was seen
+                           before (within the bounded record), the previously
+                           returned result is returned WITHOUT writing new
+                           records.  ``None`` disables idempotency and always
+                           writes.  Backward compatible: existing keyword
+                           callers are unaffected.
 
         Returns:
             dict with 'observations' and 'facts' lists of written records.
         """
+        if idempotency_key is not None and idempotency_key in self._idempotency:
+            cached = self._idempotency[idempotency_key]
+            # Refresh recency, then return copies so callers cannot mutate
+            # the cached record lists.
+            self._idempotency.move_to_end(idempotency_key)
+            return {
+                "observations": list(cached["observations"]),
+                "facts": list(cached["facts"]),
+            }
+
         obs = self.write_observation(
             title=f"Turn: {user_input[:80]}",
             summary=f"User: {user_input[:120]} | Response: {response_text[:120]}",
@@ -342,4 +372,15 @@ class WritebackEngine:
             )
             written_facts.append(fact_record)
 
-        return {"observations": [obs], "facts": written_facts}
+        result: dict[str, list] = {"observations": [obs], "facts": written_facts}
+
+        if idempotency_key is not None:
+            # Store copies; evict oldest when the record is full.
+            self._idempotency[idempotency_key] = {
+                "observations": list(result["observations"]),
+                "facts": list(result["facts"]),
+            }
+            while len(self._idempotency) > self.IDEMPOTENCY_RECORD_CAP:
+                self._idempotency.popitem(last=False)
+
+        return result
