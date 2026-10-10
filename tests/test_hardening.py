@@ -596,36 +596,44 @@ from wyrdforge.bridges import http_api as _http_api_module
 from wyrdforge.bridges.http_api import WyrdHTTPServer
 
 
-class _ScriptedServer:
-    """Stand-in for _ThreadingHTTPServer with a scripted crash state.
+class _ScriptedThread:
+    """Stand-in for the serve thread with scripted liveness.
 
-    The watchdog detects a crash via the ``_BaseServer__shutdown_request``
-    flag (the literal attribute name http.server uses after mangling).
-    Each health-check consumes the next script entry; exhausted script
-    defaults to ``default`` (crashed). ``serve_forever`` returns
-    immediately — the fake is already "dead", the flag is what the
-    watchdog reads.
+    The watchdog detects a crash via ``Thread.is_alive()`` on the thread
+    running ``serve_forever`` — no private interpreter internals. Each
+    health-check consumes the next script entry; an exhausted script
+    defaults to ``default`` (crashed). ``True`` means crashed (the thread
+    is dead), mirroring the old flag-script semantics.
     """
 
     def __init__(self, script: list, default: bool = True):
         self._script = script
         self._default = default
 
-    @property
-    def _BaseServer__shutdown_request(self):  # noqa: N802 (literal name the watchdog reads)
-        if self._script:
-            return self._script.pop(0)
-        return self._default
+    def is_alive(self) -> bool:
+        crashed = self._script.pop(0) if self._script else self._default
+        return not crashed
+
+
+class _ScriptedServer:
+    """Stand-in for _ThreadingHTTPServer for start_background budget tests.
+
+    ``serve_forever`` returns immediately — the fake serve thread is already
+    "dead"; the server object itself is never crash-probed, only the
+    thread is.
+    """
 
     def serve_forever(self):
         return None
 
 
 def _watchdog_harness(script, default: bool = True):
-    """Build a WyrdHTTPServer whose restarts are scripted fakes.
+    """Build a WyrdHTTPServer whose serve-thread liveness is scripted.
 
-    Returns (server, calls, factory) where calls counts
-    _ThreadingHTTPServer instantiations (i.e. restarts performed).
+    Returns (server, calls) where calls counts restarts performed.
+    Restarts are scripted too (``_restart_server`` is replaced), so no
+    real sockets are bound — the watchdog's decision logic is what's
+    under test.
     """
     server = WyrdHTTPServer.__new__(WyrdHTTPServer)
     server._stopped = threading.Event()
@@ -634,31 +642,32 @@ def _watchdog_harness(script, default: bool = True):
         max_attempts=4, base_delay=0.01, max_delay=0.05, jitter=0.0
     )
     server._watchdog_failures = 0
+    server._serve_thread = _ScriptedThread(script, default=default)
     server._host = "localhost"
     server._port = 0
     server._handler_cls = object
-    server._server = _ScriptedServer(script, default=default)
     calls: list = []
 
-    def factory(*args, **kwargs):
+    def fake_restart():
         calls.append(1)
-        return _ScriptedServer(script, default=default)
+        server._serve_thread = _ScriptedThread(script, default=default)
+        return server._serve_thread
 
-    return server, calls, factory
+    server._restart_server = fake_restart
+    return server, calls
 
 
 class TestWatchdogBoundedRestarts:
-    def _run_watchdog(self, server, factory, join_timeout: float = 10.0):
-        with patch.object(_http_api_module, "_ThreadingHTTPServer", side_effect=factory):
-            thread = threading.Thread(target=server._watchdog_loop, daemon=True)
-            thread.start()
-            thread.join(timeout=join_timeout)
+    def _run_watchdog(self, server, join_timeout: float = 10.0):
+        thread = threading.Thread(target=server._watchdog_loop, daemon=True)
+        thread.start()
+        thread.join(timeout=join_timeout)
         return thread
 
     def test_crash_loop_reaches_terminal_state(self, caplog):
-        server, calls, factory = _watchdog_harness([])
+        server, calls = _watchdog_harness([])
         with caplog.at_level(_logging.CRITICAL, logger="wyrdforge.bridges.http_api"):
-            thread = self._run_watchdog(server, factory)
+            thread = self._run_watchdog(server)
         assert not thread.is_alive(), "watchdog thread did not exit after terminal state"
         # 4 consecutive crashes -> 4 restarts; the 5th detection stops.
         assert len(calls) == 4
@@ -669,19 +678,19 @@ class TestWatchdogBoundedRestarts:
         # crash, crash, HEALTHY (reset), then 4 straight crashes -> terminal
         # only after 4 *consecutive* crashes. Without the reset the 5th
         # check would already be terminal with 4 restarts total.
-        server, calls, factory = _watchdog_harness(
+        server, calls = _watchdog_harness(
             [True, True, False, True, True, True, True, True]
         )
         with caplog.at_level(_logging.CRITICAL, logger="wyrdforge.bridges.http_api"):
-            thread = self._run_watchdog(server, factory)
+            thread = self._run_watchdog(server)
         assert not thread.is_alive()
         assert len(calls) == 6, f"expected 6 restarts (2 + 4 after reset), got {len(calls)}"
         assert any("STOPPED" in r.message for r in caplog.records)
 
     def test_transient_crash_still_restarts(self):
         # One crash among healthy checks: restarts once, keeps watching.
-        server, calls, factory = _watchdog_harness([True], default=False)
-        thread = self._run_watchdog(server, factory, join_timeout=1.0)
+        server, calls = _watchdog_harness([True], default=False)
+        thread = self._run_watchdog(server, join_timeout=1.0)
         # The watchdog is still watching (no terminal state on this script);
         # stop it ourselves.
         assert thread.is_alive()
@@ -699,9 +708,9 @@ class TestWatchdogBoundedRestarts:
             delays.append(d)
             return d
 
-        server, calls, factory = _watchdog_harness([])
+        server, calls = _watchdog_harness([])
         with patch.object(BackoffConfig, "delay_for", spy):
-            self._run_watchdog(server, factory)
+            self._run_watchdog(server)
         assert delays == [0.01, 0.02, 0.04, 0.05], delays
 
     def test_start_background_restores_watchdog_budget(self, monkeypatch):
@@ -710,16 +719,22 @@ class TestWatchdogBoundedRestarts:
         # otherwise the first post-intervention crash would CRITICAL-stop
         # with zero restarts, and the "manual intervention required"
         # recovery path would be broken.
-        server, calls, factory = _watchdog_harness([])
-        thread = self._run_watchdog(server, factory)
+        server, calls = _watchdog_harness([])
+        thread = self._run_watchdog(server)
         assert not thread.is_alive()
         assert len(calls) == 4
         assert server._watchdog_failures == 5  # terminal state consumed it
 
         # Restart through the real entry point (socket factory stubbed).
+        # Drop the scripted _restart_server from the harness so the real
+        # one runs: it records the fresh serve thread in _serve_thread.
+        del server._restart_server
         server._watchdog = True
         server._watchdog_interval = 60.0  # watchdog parks; we assert state only
-        monkeypatch.setattr(_http_api_module, "_ThreadingHTTPServer", factory)
+        monkeypatch.setattr(
+            _http_api_module, "_ThreadingHTTPServer",
+            lambda *args, **kwargs: _ScriptedServer(),
+        )
         bg = server.start_background()
         try:
             assert server._watchdog_failures == 0

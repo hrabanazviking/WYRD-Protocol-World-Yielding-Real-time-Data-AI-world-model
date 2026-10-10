@@ -273,6 +273,7 @@ class WyrdHTTPServer:
         self._watchdog_backoff = watchdog_backoff
         self._watchdog_failures = 0
         self._server: Optional[HTTPServer] = None
+        self._serve_thread: Optional[threading.Thread] = None
         self._stopped = threading.Event()
 
         # Inject bridge + config into handler class via subclass so that
@@ -308,9 +309,7 @@ class WyrdHTTPServer:
         # watchdog restart budget, so a stale counter from a previous terminal
         # stop can't kill the new run on its first crash.
         self._watchdog_failures = 0
-        self._server = _ThreadingHTTPServer((self._host, self._port), self._handler_cls)
-        thread = threading.Thread(target=self._serve_loop, name="wyrd-server", daemon=True)
-        thread.start()
+        thread = self._restart_server()
         if self._watchdog:
             wd = threading.Thread(target=self._watchdog_loop, name="wyrd-watchdog", daemon=True)
             wd.start()
@@ -344,8 +343,32 @@ class WyrdHTTPServer:
         except Exception:
             logger.exception("WyrdHTTPServer: serve_forever exited with exception")
 
+    def _restart_server(self) -> threading.Thread:
+        """Rebuild the listening socket and launch a fresh serve thread.
+
+        Used by :meth:`start_background` and by the watchdog's restart
+        path.  The new thread is recorded in ``_serve_thread`` so the
+        watchdog can track its aliveness.  Factored out (rather than
+        inlined) so tests can script restarts without real sockets.
+        """
+        self._server = _ThreadingHTTPServer((self._host, self._port), self._handler_cls)
+        thread = threading.Thread(
+            target=self._serve_loop, name="wyrd-server", daemon=True
+        )
+        thread.start()
+        self._serve_thread = thread
+        return thread
+
     def _watchdog_loop(self) -> None:
         """Daemon thread that restarts the server if it crashes.
+
+        Crash detection is serve-thread aliveness: the background thread
+        runs ``serve_forever`` for the life of the server, so a thread
+        that is no longer alive means the server is gone.  This uses only
+        the public ``Thread.is_alive`` API — deliberately no private
+        interpreter internals (the old shutdown-request flag probe), which
+        are not part of any stability contract and differ across
+        implementations.
 
         Restarts are bounded: at most ``watchdog_backoff.max_attempts``
         restarts; the next consecutive crash after the budget is exhausted
@@ -355,37 +378,39 @@ class WyrdHTTPServer:
         transient blip restores the full restart budget.
         """
         while not self._stopped.wait(timeout=self._watchdog_interval):
-            if self._server is None:
+            thread = self._serve_thread
+            if thread is None:
                 continue
-            # Check if the serve_forever select loop is still running by
-            # inspecting the internal _BaseServer__shutdown_request flag.
+            if thread.is_alive():
+                # Healthy: a transient blip restores the full budget.
+                self._watchdog_failures = 0
+                continue
+            # The serve thread died: the server crashed (or its socket was
+            # killed from underneath it).  A graceful shutdown sets
+            # _stopped first and exits the loop above; reaching here with
+            # _stopped set means shutdown raced the health check — never
+            # restart in that case.
+            if self._stopped.is_set():
+                continue
             try:
-                if getattr(self._server, "_BaseServer__shutdown_request", False):
-                    if self._stopped.is_set():
-                        continue
-                    self._watchdog_failures += 1
-                    if self._watchdog_failures > self._watchdog_backoff.max_attempts:
-                        logger.critical(
-                            "WyrdHTTPServer watchdog: server crashed %d times in a row — "
-                            "automatic restarts STOPPED; manual intervention required",
-                            self._watchdog_failures,
-                        )
-                        return
-                    delay = self._watchdog_backoff.delay_for(self._watchdog_failures - 1)
-                    logger.warning(
-                        "WyrdHTTPServer watchdog: server stopped unexpectedly — "
-                        "restarting (attempt %d/%d in %.1fs)",
+                self._watchdog_failures += 1
+                if self._watchdog_failures > self._watchdog_backoff.max_attempts:
+                    logger.critical(
+                        "WyrdHTTPServer watchdog: server crashed %d times in a row — "
+                        "automatic restarts STOPPED; manual intervention required",
                         self._watchdog_failures,
-                        self._watchdog_backoff.max_attempts,
-                        delay,
                     )
-                    if self._stopped.wait(timeout=delay):
-                        return
-                    self._server = _ThreadingHTTPServer((self._host, self._port), self._handler_cls)
-                    t = threading.Thread(target=self._serve_loop, name="wyrd-server-restart", daemon=True)
-                    t.start()
-                else:
-                    # Healthy: a transient blip restores the full budget.
-                    self._watchdog_failures = 0
+                    return
+                delay = self._watchdog_backoff.delay_for(self._watchdog_failures - 1)
+                logger.warning(
+                    "WyrdHTTPServer watchdog: server stopped unexpectedly — "
+                    "restarting (attempt %d/%d in %.1fs)",
+                    self._watchdog_failures,
+                    self._watchdog_backoff.max_attempts,
+                    delay,
+                )
+                if self._stopped.wait(timeout=delay):
+                    return
+                self._restart_server()
             except Exception:
                 logger.exception("WyrdHTTPServer watchdog: error during health check")

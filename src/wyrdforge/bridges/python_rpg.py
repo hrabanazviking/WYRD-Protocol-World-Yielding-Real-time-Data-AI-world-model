@@ -26,6 +26,11 @@ from typing import Any
 from wyrdforge.bridges.base import BifrostBridge
 from wyrdforge.ecs.world import World
 from wyrdforge.ecs.yggdrasil import YggdrasilTree
+from wyrdforge.hardening.input_validation import (
+    MAX_ID_CHARS,
+    MAX_QUERY_INPUT_CHARS,
+    check_string,
+)
 from wyrdforge.llm.ollama_connector import OllamaConnector
 from wyrdforge.models.micro_rag import QueryMode
 from wyrdforge.models.persona import PersonaMode
@@ -184,6 +189,18 @@ class PythonRPGBridge(BifrostBridge):
         Returns:
             Character response string.
         """
+        # Trust boundary: query() is reachable from the HTTP bridge and from
+        # engine scripts alike, so it enforces the same input floor as the
+        # HTTP handler (non-empty, bounded length) — fail closed before any
+        # world/LLM work begins.
+        persona_id = check_string(
+            persona_id, field="persona_id",
+            max_len=MAX_ID_CHARS, allow_empty=False,
+        )
+        user_input = check_string(
+            user_input, field="user_input",
+            max_len=MAX_QUERY_INPUT_CHARS, allow_empty=False,
+        )
         loc = location_id or self._config.default_location_id
         entities = focus_entity_ids if focus_entity_ids is not None else [persona_id]
 
