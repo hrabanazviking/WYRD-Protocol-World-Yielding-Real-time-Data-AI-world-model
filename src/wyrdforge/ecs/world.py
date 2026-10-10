@@ -2,10 +2,30 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
 
 from wyrdforge.ecs.component import Component
 from wyrdforge.ecs.entity import Entity, _new_id, _now
+
+if TYPE_CHECKING:
+    from wyrdforge.runtime.events import EventBus
+
+#: Topics emitted by World when wired to an EventBus (opt-in via ``bus=``).
+_WORLD_TOPICS = (
+    "world.entity_created",
+    "world.entity_removed",
+    "world.component_added",
+    "world.component_removed",
+)
+
+
+def _register_world_topics(bus: "EventBus") -> None:
+    """Register the world.* topics once; tolerate double registration."""
+    for topic in _WORLD_TOPICS:
+        try:
+            bus.register_topic(topic)
+        except ValueError:
+            pass  # already registered — another producer got here first
 
 
 class World:
@@ -16,10 +36,21 @@ class World:
     full scans.
     """
 
-    def __init__(self, world_id: str, world_name: str = "") -> None:
+    def __init__(
+        self,
+        world_id: str,
+        world_name: str = "",
+        *,
+        bus: "EventBus | None" = None,
+    ) -> None:
         self.world_id: str = world_id
         self.world_name: str = world_name or world_id
         self.created_at: datetime = _now()
+        # Opt-in inner-communications wiring: bus=None preserves the exact
+        # historical behavior; a bus wires this World into the EventBus.
+        self._bus = bus
+        if self._bus is not None:
+            _register_world_topics(self._bus)
 
         # World identity in the registry of worlds (Roadmap Worlds, Slice 0).
         # Declared via identify(); None until then — identity is declared,
@@ -48,6 +79,10 @@ class World:
         self._entities[eid] = entity
         for tag in entity.tags:
             self._tag_index[tag].add(eid)
+        self._emit(
+            "world.entity_created",
+            {"entity_id": eid, "tags": sorted(entity.tags)},
+        )
         return entity
 
     def get_entity(self, entity_id: str) -> Entity | None:
@@ -65,6 +100,7 @@ class World:
         for comp_type in list(self._components.get(entity_id, {}).keys()):
             self._comp_type_index[comp_type].discard(entity_id)
         self._components.pop(entity_id, None)
+        self._emit("world.entity_removed", {"entity_id": entity_id})
 
     def tag_entity(self, entity_id: str, tag: str) -> None:
         entity = self._require_entity(entity_id)
@@ -98,6 +134,10 @@ class World:
         comp_type = component.component_type
         self._components[entity_id][comp_type] = component
         self._comp_type_index[comp_type].add(entity_id)
+        self._emit(
+            "world.component_added",
+            {"entity_id": entity_id, "component_type": comp_type},
+        )
 
     def create_entity_with_component(
         self,
@@ -144,6 +184,14 @@ class World:
         comp_type = component.component_type
         self._components[entity_id][comp_type] = component
         self._comp_type_index[comp_type].add(entity_id)
+        self._emit(
+            "world.entity_created",
+            {"entity_id": entity_id, "tags": sorted(entity.tags)},
+        )
+        self._emit(
+            "world.component_added",
+            {"entity_id": entity_id, "component_type": comp_type},
+        )
         return entity
 
     def get_component(self, entity_id: str, component_type: str) -> Component | None:
@@ -166,6 +214,10 @@ class World:
         if component_type in self._components.get(entity_id, {}):
             del self._components[entity_id][component_type]
             self._comp_type_index[component_type].discard(entity_id)
+            self._emit(
+                "world.component_removed",
+                {"entity_id": entity_id, "component_type": component_type},
+            )
 
     # ------------------------------------------------------------------
     # Query operations
@@ -254,6 +306,20 @@ class World:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _emit(self, topic: str, payload: dict) -> None:
+        """Publish an event envelope; never disturb world operations.
+
+        No-op when this World is not bus-wired.  A failing bus must not
+        break ECS semantics, so publish errors are swallowed.
+        """
+        bus = getattr(self, "_bus", None)
+        if bus is None:
+            return
+        try:
+            bus.publish(topic, payload, source="ecs.world")
+        except Exception:
+            pass
 
     def _require_entity(self, entity_id: str) -> Entity:
         entity = self._entities.get(entity_id)

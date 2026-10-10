@@ -6,7 +6,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from wyrdforge.models.common import ApprovalState, WritePolicy
 from wyrdforge.models.memory import (
@@ -23,6 +23,23 @@ from wyrdforge.hardening.input_validation import (
     validate_search_query,
 )
 from wyrdforge.hardening.state_io import open_verified_state_db
+
+if TYPE_CHECKING:
+    from wyrdforge.runtime.events import EventBus
+
+#: Topics emitted by PersistentMemoryStore when wired to an EventBus
+#: (opt-in via ``bus=``).  Only true inserts of observations and facts
+#: emit; re-adds (same record_id, e.g. re-resolves) and reads emit nothing.
+_MEMORY_TOPICS = ("memory.observation_added", "memory.fact_added")
+
+
+def _register_memory_topics(bus: "EventBus") -> None:
+    """Register the memory.* topics once; tolerate double registration."""
+    for topic in _MEMORY_TOPICS:
+        try:
+            bus.register_topic(topic)
+        except ValueError:
+            pass  # already registered — another producer got here first
 
 # ---------------------------------------------------------------------------
 # Record type registry — maps record_type string → MemoryRecord subclass
@@ -142,10 +159,15 @@ class PersistentMemoryStore:
     - Integrity check
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, bus: "EventBus | None" = None) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+        # Opt-in inner-communications wiring: bus=None preserves the exact
+        # historical behavior; a bus wires inserts into the EventBus.
+        self._bus = bus
+        if self._bus is not None:
+            _register_memory_topics(self._bus)
 
     # ------------------------------------------------------------------
     # Schema init
@@ -205,11 +227,25 @@ class PersistentMemoryStore:
     # ------------------------------------------------------------------
 
     def add(self, record: MemoryRecord) -> None:
-        """Insert or replace a memory record."""
+        """Insert or replace a memory record.
+
+        When this store is bus-wired, a TRUE insert (no prior row with this
+        ``record_id``) of an ObservationRecord or CanonicalFactRecord emits
+        ``memory.observation_added`` / ``memory.fact_added`` respectively.
+        Re-adds of an existing record_id (e.g. ``resolve()`` re-writes) and
+        reads emit nothing.  Bus errors never break the write.
+        """
         payload = json.loads(record.model_dump_json())
         expires_at = record.lifecycle.expires_at.isoformat() if record.lifecycle.expires_at else None
 
         with self._connect() as conn:
+            # REAL-insert detection: the INSERT below is OR REPLACE, so a
+            # pre-existing row with the same record_id is a replace, not a
+            # new insert — those must not emit.
+            is_new = conn.execute(
+                "SELECT 1 FROM memory_records WHERE record_id=?",
+                (record.record_id,),
+            ).fetchone() is None
             conn.execute(
                 "INSERT OR REPLACE INTO memory_records "
                 "(record_id, store, record_type, tenant_id, system_id, "
@@ -243,6 +279,25 @@ class PersistentMemoryStore:
                     " ".join(record.retrieval.lexical_terms),
                 ),
             )
+
+        if is_new:
+            self._emit_insert(record)
+
+    def _emit_insert(self, record: MemoryRecord) -> None:
+        """Emit a memory.* event for a true insert; swallow bus errors."""
+        bus = getattr(self, "_bus", None)
+        if bus is None:
+            return
+        if isinstance(record, ObservationRecord):
+            topic = "memory.observation_added"
+        elif isinstance(record, CanonicalFactRecord):
+            topic = "memory.fact_added"
+        else:
+            return  # only observations and facts are wired events
+        try:
+            bus.publish(topic, {"record_id": record.record_id}, source="persistence.memory_store")
+        except Exception:
+            pass
 
     def delete(self, record_id: str) -> bool:
         """Remove a record. Returns True if it existed."""

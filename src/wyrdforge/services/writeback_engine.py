@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from wyrdforge.models.common import (
     Audit,
@@ -34,6 +34,22 @@ from wyrdforge.models.memory import (
     PolicyRecord,
 )
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
+
+if TYPE_CHECKING:
+    from wyrdforge.runtime.events import EventBus
+
+#: Topics emitted by WritebackEngine when wired to an EventBus
+#: (opt-in via ``bus=``).
+_WRITEBACK_TOPICS = ("writeback.written", "writeback.replay")
+
+
+def _register_writeback_topics(bus: "EventBus") -> None:
+    """Register the writeback.* topics once; tolerate double registration."""
+    for topic in _WRITEBACK_TOPICS:
+        try:
+            bus.register_topic(topic)
+        except ValueError:
+            pass  # already registered — another producer got here first
 
 
 def _now() -> datetime:
@@ -95,12 +111,18 @@ class WritebackEngine:
         *,
         default_tenant_id: str = "default",
         default_system_id: str = "wyrd",
+        bus: "EventBus | None" = None,
     ) -> None:
         self._store = store
         self._tenant_id = default_tenant_id
         self._system_id = default_system_id
         # idempotency_key -> {"observations": [...], "facts": [...]} (record lists)
         self._idempotency: OrderedDict[str, dict[str, list]] = OrderedDict()
+        # Opt-in inner-communications wiring: bus=None preserves the exact
+        # historical behavior; a bus wires write events into the EventBus.
+        self._bus = bus
+        if self._bus is not None:
+            _register_writeback_topics(self._bus)
 
     # ------------------------------------------------------------------
     # Observation (HUGIN)
@@ -347,6 +369,10 @@ class WritebackEngine:
             # Refresh recency, then return copies so callers cannot mutate
             # the cached record lists.
             self._idempotency.move_to_end(idempotency_key)
+            self._emit(
+                "writeback.replay",
+                {"idempotency_key": idempotency_key},
+            )
             return {
                 "observations": list(cached["observations"]),
                 "facts": list(cached["facts"]),
@@ -383,4 +409,33 @@ class WritebackEngine:
             while len(self._idempotency) > self.IDEMPOTENCY_RECORD_CAP:
                 self._idempotency.popitem(last=False)
 
+        self._emit(
+            "writeback.written",
+            {
+                "record_ids": {
+                    "observations": [r.record_id for r in result["observations"]],
+                    "facts": [r.record_id for r in result["facts"]],
+                },
+                "idempotency_key": idempotency_key,
+            },
+        )
+
         return result
+
+    # ------------------------------------------------------------------
+    # Bus wiring helper
+    # ------------------------------------------------------------------
+
+    def _emit(self, topic: str, payload: dict) -> None:
+        """Publish an event envelope; never disturb write semantics.
+
+        No-op when this engine is not bus-wired.  Bus errors are
+        swallowed — a write is a write regardless of bus health.
+        """
+        bus = getattr(self, "_bus", None)
+        if bus is None:
+            return
+        try:
+            bus.publish(topic, payload, source="services.writeback")
+        except Exception:
+            pass

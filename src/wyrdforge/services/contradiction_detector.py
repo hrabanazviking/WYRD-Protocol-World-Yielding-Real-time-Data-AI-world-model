@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from wyrdforge.models.common import ApprovalState, StoreName, WritePolicy
 from wyrdforge.models.memory import (
@@ -23,6 +24,22 @@ from wyrdforge.models.common import (
 )
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
 
+if TYPE_CHECKING:
+    from wyrdforge.runtime.events import EventBus
+
+#: Topics emitted by ContradictionDetector when wired to an EventBus
+#: (opt-in via ``bus=``).
+_CONTRADICTION_TOPICS = ("contradiction.detected",)
+
+
+def _register_contradiction_topics(bus: "EventBus") -> None:
+    """Register the contradiction.* topics once; tolerate double registration."""
+    for topic in _CONTRADICTION_TOPICS:
+        try:
+            bus.register_topic(topic)
+        except ValueError:
+            pass  # already registered — another producer got here first
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -42,8 +59,13 @@ class ContradictionDetector:
     internally consistent.
     """
 
-    def __init__(self, store: PersistentMemoryStore) -> None:
+    def __init__(self, store: PersistentMemoryStore, *, bus: "EventBus | None" = None) -> None:
         self._store = store
+        # Opt-in inner-communications wiring: bus=None preserves the exact
+        # historical behavior; a bus wires detection events into the EventBus.
+        self._bus = bus
+        if self._bus is not None:
+            _register_contradiction_topics(self._bus)
 
     def check_and_record(self, new_record: CanonicalFactRecord) -> list[ContradictionRecord]:
         """Check for conflicts when adding a new CanonicalFactRecord.
@@ -75,7 +97,37 @@ class ContradictionDetector:
 
             conflicts.append(contradiction)
 
+        if conflicts:
+            self._emit(
+                "contradiction.detected",
+                {
+                    "count": len(conflicts),
+                    "fact_ids": [
+                        new_record.record_id,
+                        *[
+                            c.content.structured_payload.claim_b_record_id
+                            for c in conflicts
+                        ],
+                    ],
+                },
+            )
         return conflicts
+
+    def _emit(self, topic: str, payload: dict) -> None:
+        """Publish an event envelope; never disturb detection semantics.
+
+        No-op when this detector is not bus-wired.  Bus errors are
+        swallowed — detection results stand regardless of bus health.
+        """
+        bus = getattr(self, "_bus", None)
+        if bus is None:
+            return
+        try:
+            bus.publish(
+                topic, payload, source="services.contradiction_detector"
+            )
+        except Exception:
+            pass
 
     def find_open_contradictions(self) -> list[ContradictionRecord]:
         """Return all unresolved ContradictionRecords."""

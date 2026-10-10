@@ -27,7 +27,23 @@ import sqlite3
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from wyrdforge.runtime.events import EventBus
+
+#: Topic emitted by quarantine_file when wired to an EventBus
+#: (opt-in via ``bus=``).
+_STATE_TOPICS = ("state.quarantined",)
+
+
+def _register_state_topics(bus: "EventBus") -> None:
+    """Register the state.* topics once; tolerate double registration."""
+    for topic in _STATE_TOPICS:
+        try:
+            bus.register_topic(topic)
+        except ValueError:
+            pass  # already registered — another producer got here first
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +96,8 @@ def _local_stamp() -> str:
 
 
 def quarantine_file(path: str | Path, reason: str = "",
-                    detail: str = "") -> Path:
+                    detail: str = "", *,
+                    bus: "EventBus | None" = None) -> Path:
     """Move a corrupt state file aside for later inspection.
 
     The file (plus any SQLite ``-wal`` / ``-shm`` companions) is moved to
@@ -91,8 +108,14 @@ def quarantine_file(path: str | Path, reason: str = "",
 
     Quarantine preserves the bytes — it never deletes. A name collision
     (same second) gets a ``-2``, ``-3`` suffix rather than overwriting.
+
+    When ``bus`` is given, a ``state.quarantined`` event is published
+    after the move; ``bus=None`` (the default) preserves the exact
+    historical behavior. Bus errors never disturb the quarantine.
     """
     path = Path(path)
+    if bus is not None:
+        _register_state_topics(bus)
     dest_dir = path.parent / "quarantine"
     dest_dir.mkdir(parents=True, exist_ok=True)
     stamp = _local_stamp()
@@ -113,6 +136,22 @@ def quarantine_file(path: str | Path, reason: str = "",
         path,
         dest,
     )
+    # Wired event: announce the quarantine after the move completed.
+    # Bus trouble must never disturb a quarantine.
+    if bus is not None:
+        try:
+            bus.publish(
+                "state.quarantined",
+                {
+                    "path": str(path),
+                    "dest": str(dest),
+                    "reason": reason,
+                    "detail": detail,
+                },
+                source="hardening.state_io",
+            )
+        except Exception:
+            pass
     return dest
 
 

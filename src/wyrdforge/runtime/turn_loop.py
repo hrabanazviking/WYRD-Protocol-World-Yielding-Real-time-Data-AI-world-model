@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from pydantic import Field
 
@@ -35,7 +36,22 @@ from wyrdforge.oracle.passive_oracle import PassiveOracle
 from wyrdforge.services.contradiction_detector import ContradictionDetector
 from wyrdforge.services.writeback_engine import WritebackEngine
 
+if TYPE_CHECKING:
+    from wyrdforge.runtime.events import EventBus
+
 logger = logging.getLogger(__name__)
+
+#: Topics emitted by TurnLoop when wired to an EventBus (opt-in via ``bus=``).
+_TURN_TOPICS = ("turn.started", "turn.completed")
+
+
+def _register_turn_topics(bus: "EventBus") -> None:
+    """Register the turn.* topics once; tolerate double registration."""
+    for topic in _TURN_TOPICS:
+        try:
+            bus.register_topic(topic)
+        except ValueError:
+            pass  # already registered — another producer got here first
 
 #: Maximum accepted user_input length (characters).  Guards the prompt
 #: builder and the observation writer against pathological input.
@@ -86,6 +102,7 @@ class TurnLoop:
         persona_name: str = "",
         persona_notes: str = "",
         history_limit: int = 10,
+        bus: "EventBus | None" = None,
     ) -> None:
         self._oracle = oracle
         self._engine = engine
@@ -100,6 +117,11 @@ class TurnLoop:
         self._history: list[dict[str, str]] = []
         # Observability: one stable identity for the life of this loop.
         self.run_id = uuid.uuid4().hex
+        # Opt-in inner-communications wiring: bus=None preserves the exact
+        # historical behavior; a bus wires turn events into the EventBus.
+        self._bus = bus
+        if self._bus is not None:
+            _register_turn_topics(self._bus)
 
     # ------------------------------------------------------------------
     # Main API
@@ -145,6 +167,13 @@ class TurnLoop:
         turn_id = uuid.uuid4().hex
         stage_errors: list[str] = []
         effective_loc = location_id or self._location_id
+
+        # Wired event: announce the turn before the oracle stage runs.
+        self._emit(
+            "turn.started",
+            {"turn_id": turn_id, "run_id": self.run_id, "input_len": len(user_input)},
+            turn_id=turn_id,
+        )
 
         # 1. Build world context — degrade to a minimal-but-valid packet on
         #    oracle failure so the turn can still proceed on ECS-less context.
@@ -240,7 +269,7 @@ class TurnLoop:
         self._history.append({"role": "assistant", "content": response_text})
         logger.debug("[turn_id=%s] stage 6: turn complete", turn_id)
 
-        return TurnResult(
+        result = TurnResult(
             user_input=user_input,
             assistant_response=response_text,
             context_packet=packet,
@@ -251,6 +280,40 @@ class TurnLoop:
             run_id=self.run_id,
             turn_id=turn_id,
         )
+
+        # Wired event: always announce completion — even when stages
+        # degraded.  The turn itself must never be aborted by bus trouble.
+        self._emit(
+            "turn.completed",
+            {
+                "turn_id": turn_id,
+                "run_id": self.run_id,
+                "contradictions_found": contradictions_found,
+                "stage_errors": list(stage_errors),
+                "degraded": bool(stage_errors or error),
+            },
+            turn_id=turn_id,
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # Bus wiring helper
+    # ------------------------------------------------------------------
+
+    def _emit(self, topic: str, payload: dict, *, turn_id: str | None = None) -> None:
+        """Publish an event envelope; never disturb turn execution.
+
+        No-op when this TurnLoop is not bus-wired.  Bus errors are
+        swallowed here — the contract is that the turn completes
+        regardless of bus health.
+        """
+        bus = getattr(self, "_bus", None)
+        if bus is None:
+            return
+        try:
+            bus.publish(topic, payload, source="runtime.turn_loop", turn_id=turn_id)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Degraded packet
