@@ -38,7 +38,8 @@ class CorruptStateError(Exception):
     Attributes:
         path: the state file that failed.
         reason: one of ``"not-a-database"`` | ``"integrity-failed"`` |
-            ``"unknown-version"`` | ``"unmigratable"``.
+            ``"unknown-version"`` | ``"unmigratable"`` | ``"not-json"`` |
+            ``"invalid-content"``.
         detail: human-readable explanation (safe to log; never invents
             a cause — it names what was observed).
 
@@ -238,6 +239,168 @@ def open_or_quarantine(
             open_state_db(path, current_version=current_version, migrations=migrations),
             True,
         )
+
+
+def prune_quarantine(directory: str | Path, keep: int = 10) -> int:
+    """Delete the oldest quarantined files, keeping the ``keep`` newest.
+
+    Quarantine preserves bytes — that is its job — but an unattended forge
+    accumulates quarantined files forever. This is the bounded counterpart:
+    it keeps the ``keep`` newest files (by mtime, so a forensics trail
+    survives) and deletes the rest. Only files directly inside
+    ``directory`` are considered; subdirectories are never touched.
+
+    Args:
+        directory: The quarantine directory to prune.
+        keep:      How many of the newest files to keep (>= 0).
+
+    Returns:
+        The number of files deleted.
+
+    Raises:
+        ValueError: If ``keep`` is negative.
+    """
+    if keep < 0:
+        raise ValueError(f"keep must be >= 0, got {keep}")
+    directory = Path(directory)
+    if not directory.is_dir():
+        return 0
+    files = sorted(
+        (p for p in directory.iterdir() if p.is_file()),
+        key=lambda p: (p.stat().st_mtime, p.name),
+        reverse=True,
+    )
+    pruned = 0
+    for stale in files[keep:]:
+        try:
+            stale.unlink()
+            pruned += 1
+        except OSError:
+            log.warning("prune_quarantine: could not delete %s", stale)
+    if pruned:
+        log.info(
+            "prune_quarantine: removed %d file(s) from %s, kept %d newest",
+            pruned,
+            directory,
+            keep,
+        )
+    return pruned
+
+
+def read_json_state(
+    path: str | Path,
+    *,
+    validator: Callable[[object], bool] | None = None,
+) -> object:
+    """Read-side companion to :func:`atomic_write_json`.
+
+    Reads *path* as JSON and returns the parsed object. On a JSON decode
+    failure — or when *validator* rejects the content — the file is
+    quarantined (bytes preserved, announced once) and a
+    :class:`CorruptStateError` is raised, mirroring the strict-open
+    philosophy of :func:`open_state_db`: corrupt state is never silently
+    misread, never silently dropped.
+
+    Args:
+        path:      The JSON state file to read.
+        validator: Optional callable ``obj -> bool``. Return a truthy
+                   value for acceptable content. A falsy return — or an
+                   exception from the validator itself — counts as
+                   rejection.
+
+    Returns:
+        The parsed JSON object.
+
+    Raises:
+        FileNotFoundError: The file does not exist (missing is normal;
+            callers create fresh state instead — same rule as the DB
+            helpers).
+        CorruptStateError: ``reason="not-json"`` when the bytes are not
+            valid JSON; ``reason="invalid-content"`` when the validator
+            rejects the parsed object. In both cases the file has already
+            been quarantined.
+    """
+    path = Path(path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise CorruptStateError(path, "not-json", f"cannot read file: {exc}") from exc
+    try:
+        obj = json.loads(text)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        quarantine_file(path, reason="not-json", detail=str(exc))
+        raise CorruptStateError(
+            path, "not-json", f"file is not valid JSON: {exc}"
+        ) from exc
+    if validator is not None:
+        try:
+            accepted = validator(obj)
+        except Exception as exc:
+            quarantine_file(
+                path, reason="invalid-content", detail=f"validator raised: {exc}"
+            )
+            raise CorruptStateError(
+                path, "invalid-content", f"validator raised {exc!r}"
+            ) from exc
+        if not accepted:
+            quarantine_file(path, reason="invalid-content", detail="validator rejected content")
+            raise CorruptStateError(
+                path, "invalid-content", "validator rejected content"
+            )
+    return obj
+
+
+def open_verified_state_db(
+    path: str | Path,
+    *,
+    current_version: int,
+    migrations: dict[int, Callable[[sqlite3.Connection], None]] | None = None,
+) -> tuple[sqlite3.Connection, bool]:
+    """Open a state DB and verify its structural integrity, not just its header.
+
+    Why this exists: :func:`open_or_quarantine` only proves SQLite can
+    *parse* the file header. Bit-rot, a torn write that landed inside a
+    data page, or deliberate tampering can leave a file that opens fine
+    but is structurally corrupt — every later read then fails in a new
+    and exciting place. This helper runs ``PRAGMA integrity_check`` after
+    the guarded open; if the check reports anything other than ``ok`` the
+    file is quarantined (bytes preserved for forensics) and a fresh DB is
+    opened instead, with ``recovered=True``.
+
+    Args:
+        path:            The SQLite state file.
+        current_version:  Schema version this code knows (forwarded to
+                         :func:`open_or_quarantine`).
+        migrations:      Forward migration map (forwarded).
+
+    Returns:
+        ``(conn, recovered)`` — ``recovered`` is True when the file was
+        quarantined for *any* reason (unreadable header OR failed
+        integrity check) and a fresh DB was opened instead.
+    """
+    path = Path(path)
+    conn, recovered = open_or_quarantine(
+        path, current_version=current_version, migrations=migrations
+    )
+    try:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+    except sqlite3.Error as exc:
+        # The check itself blew up: the file is corrupt by definition.
+        rows = [(f"integrity_check raised: {exc}",)]
+    problems = [str(row[0]) for row in rows if str(row[0]).lower() != "ok"]
+    if not problems:
+        return conn, recovered
+    conn.close()
+    detail = "; ".join(problems[:5])
+    if len(problems) > 5:
+        detail += f" (+{len(problems) - 5} more)"
+    quarantine_file(path, reason="integrity-failed", detail=detail)
+    conn, _ = open_or_quarantine(
+        path, current_version=current_version, migrations=migrations
+    )
+    return conn, True
 
 
 def atomic_write_json(path: str | Path, obj: object) -> None:

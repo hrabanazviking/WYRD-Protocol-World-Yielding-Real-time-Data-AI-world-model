@@ -10,6 +10,7 @@ Modules:
                        event-envelope shared by both ingest doors,
                        per-type event schemas, FTS5 search bounds
     backoff          — Exponential back-off with jitter for retryable operations
+    circuit_breaker  — Fail-fast circuit breaker for flaky dependencies
     normalization    — Unicode-safe persona_id normalisation guard
     pool             — Bounded daemon-thread pool (caps concurrent push operations)
     config_validator — Canonical world-config schema validator + env-var type coercer

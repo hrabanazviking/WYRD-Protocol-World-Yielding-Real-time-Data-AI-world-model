@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,8 @@ class BoundedThreadPool:
         self._shutdown = False
         self._tasks_submitted = 0
         self._tasks_dropped = 0
+        self._tasks_completed = 0
+        self._tasks_failed = 0
 
         for i in range(max_workers):
             t = threading.Thread(
@@ -101,21 +104,56 @@ class BoundedThreadPool:
             return False
 
     def shutdown(self, *, wait: bool = True, timeout: float = 5.0) -> None:
-        """Stop accepting new tasks and optionally wait for queued tasks to finish.
+        """Stop accepting new tasks and optionally drain before stopping workers.
+
+        Why the ordering matters: the old code sent the exit sentinels
+        first. If the queue was full at that moment the sentinel puts were
+        silently dropped, and workers blocked in ``get()`` would wake up,
+        see the shutdown flag, and exit while real tasks were still
+        queued — fire-and-forget work silently abandoned. Now shutdown is
+        two phases:
+
+        1. **Drain** (``wait=True`` only): wait — bounded by *timeout* —
+           for every queued task to be picked up and finished. Workers keep
+           running normally during this phase; no sentinel is in the queue.
+        2. **Stop**: one sentinel per worker, appended behind any remaining
+           tasks (FIFO), so no worker exits while real work is still ahead
+           of its sentinel. Workers are then joined, bounded by the
+           remaining *timeout* budget.
 
         Args:
-            wait:    If True, wait up to *timeout* seconds for workers to drain.
-            timeout: Maximum seconds to wait per worker thread.
+            wait:    If True, drain the pending queue (up to *timeout*
+                     seconds) before stopping workers.
+            timeout: Total seconds budget for the whole shutdown (drain +
+                     worker join). A stuck task cannot hang shutdown forever;
+                     it is logged and shutdown moves on.
         """
         self._shutdown = True
+        deadline: float | None = None
+        if wait:
+            deadline = time.monotonic() + max(0.0, timeout)
+            self._drain_queue(deadline, timeout)
+        # Phase 2 — stop. Sentinels go to the TAIL of the FIFO queue, behind
+        # any task still pending, so a worker can only see its sentinel
+        # after all real work ahead of it has run.
         for _ in self._workers:
             try:
-                self._queue.put_nowait(_SENTINEL)
+                if deadline is not None:
+                    remaining = max(0.0, deadline - time.monotonic())
+                    self._queue.put(_SENTINEL, timeout=remaining)
+                else:
+                    self._queue.put_nowait(_SENTINEL)
             except queue.Full:
-                pass
-        if wait:
+                # Extremely unlikely after a drain (or acceptable when not
+                # waiting): a worker with no sentinel still exits via the
+                # get()-timeout + shutdown-flag path in _worker_loop.
+                logger.warning(
+                    "BoundedThreadPool: could not deliver shutdown sentinel"
+                )
+        if wait and deadline is not None:
             for t in self._workers:
-                t.join(timeout=timeout)
+                remaining = max(0.0, deadline - time.monotonic())
+                t.join(timeout=remaining)
 
     @property
     def max_workers(self) -> int:
@@ -139,9 +177,42 @@ class BoundedThreadPool:
         with self._lock:
             return self._tasks_dropped
 
+    @property
+    def tasks_completed(self) -> int:
+        """Total tasks that ran to completion without raising."""
+        with self._lock:
+            return self._tasks_completed
+
+    @property
+    def tasks_failed(self) -> int:
+        """Total tasks that raised an exception (logged, pool unaffected)."""
+        with self._lock:
+            return self._tasks_failed
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _drain_queue(self, deadline: float, timeout: float) -> None:
+        """Phase 1 of shutdown: wait for queued work to finish, bounded.
+
+        Waits until ``unfinished_tasks`` reaches zero — i.e. every queued
+        task has been picked up *and* finished (workers call
+        ``task_done()`` in a ``finally``). Bounded by *deadline* so a
+        wedged task is logged and abandoned by shutdown (the daemon
+        workers still finish it afterwards), never a hang.
+        """
+        while self._queue.unfinished_tasks > 0:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "BoundedThreadPool: shutdown timeout (%.1fs) expired "
+                    "with %d task(s) still unfinished",
+                    timeout,
+                    self._queue.unfinished_tasks,
+                )
+                return
+            time.sleep(min(0.02, remaining))
 
     def _worker_loop(self) -> None:
         while True:
@@ -153,12 +224,22 @@ class BoundedThreadPool:
                 continue
 
             if item is _SENTINEL:
+                # Balance the put() so unfinished_tasks stays honest for
+                # the drain phase (and for a second shutdown() call).
+                self._queue.task_done()
                 return
 
             fn, args, kwargs = item
             try:
                 fn(*args, **kwargs)
             except Exception:
+                # A failing task must not kill the worker: count it, log
+                # it, and keep the loop draining.
+                with self._lock:
+                    self._tasks_failed += 1
                 logger.exception("BoundedThreadPool: unhandled exception in task")
+            else:
+                with self._lock:
+                    self._tasks_completed += 1
             finally:
                 self._queue.task_done()

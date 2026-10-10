@@ -44,6 +44,44 @@ class BackoffConfig:
     multiplier: float = 2.0
     jitter: float = 0.25
 
+    def __post_init__(self) -> None:
+        """Fail fast on nonsense configurations.
+
+        Why: ``retry_with_backoff`` loops ``range(max_attempts)`` and then
+        does ``raise last_exc``. With ``max_attempts=0`` the loop body never
+        runs, so ``last_exc`` is still ``None`` and the caller gets a
+        ``TypeError: exceptions must derive from BaseException`` instead of
+        the real error — a confusing failure at 3 a.m. Rejecting the bad
+        config at construction time makes the mistake impossible to ship.
+        """
+        if isinstance(self.max_attempts, bool) or not isinstance(
+            self.max_attempts, int
+        ):
+            raise ValueError(
+                f"max_attempts must be an int, got {self.max_attempts!r}"
+            )
+        if self.max_attempts < 1:
+            raise ValueError(
+                f"max_attempts must be >= 1, got {self.max_attempts}"
+            )
+        if self.base_delay < 0:
+            raise ValueError(
+                f"base_delay must be >= 0, got {self.base_delay}"
+            )
+        if self.max_delay < self.base_delay:
+            raise ValueError(
+                f"max_delay ({self.max_delay}) must be >= "
+                f"base_delay ({self.base_delay})"
+            )
+        if self.multiplier < 1:
+            raise ValueError(
+                f"multiplier must be >= 1, got {self.multiplier}"
+            )
+        if not 0 <= self.jitter <= 1:
+            raise ValueError(
+                f"jitter must be within [0, 1], got {self.jitter}"
+            )
+
     def delay_for(self, attempt: int) -> float:
         """Return the sleep duration (seconds) before *attempt* (0-based).
 
