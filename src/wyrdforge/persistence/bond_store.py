@@ -13,7 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from wyrdforge.models.bond import BondEdge, Hurt, Vow
-from wyrdforge.hardening.state_io import open_or_quarantine
+from wyrdforge.hardening.state_io import open_verified_state_db
+
+#: Schema version stamped as ``PRAGMA user_version`` on the bond DB.
+#: Bump when _SCHEMA gains a table/column, and add a forward migration.
+CURRENT_SCHEMA_VERSION = 1
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS bond_edges (
@@ -67,7 +71,11 @@ class PersistentBondStore:
     def _init_schema(self) -> None:
         # Guarded open: a corrupt DB is quarantined (announced once) and a
         # fresh one created — the constructor never crashes on bad bytes.
-        conn, _recovered = open_or_quarantine(self._db_path, current_version=1)
+        # open_verified_state_db also runs PRAGMA integrity_check, catching
+        # bit-rot inside data pages that a header-only open would miss.
+        conn, _recovered = open_verified_state_db(
+            self._db_path, current_version=CURRENT_SCHEMA_VERSION
+        )
         with conn:
             conn.executescript(_SCHEMA)
 

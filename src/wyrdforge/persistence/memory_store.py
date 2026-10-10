@@ -22,7 +22,7 @@ from wyrdforge.hardening.input_validation import (
     fts5_phrase,
     validate_search_query,
 )
-from wyrdforge.hardening.state_io import open_or_quarantine
+from wyrdforge.hardening.state_io import open_verified_state_db
 
 # ---------------------------------------------------------------------------
 # Record type registry — maps record_type string → MemoryRecord subclass
@@ -47,6 +47,10 @@ def _deserialize_record(data: dict) -> MemoryRecord:
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
+
+#: Schema version stamped as ``PRAGMA user_version`` on the memory DB.
+#: Bump when _SCHEMA gains a table/column, and add a forward migration.
+CURRENT_SCHEMA_VERSION = 1
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_records (
@@ -85,6 +89,47 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def repair_memory_db(path: str | Path) -> dict:
+    """Attempt to repair a memory-store SQLite DB and report honestly.
+
+    Runs ``VACUUM`` (rebuilds the file, dropping unreachable pages),
+    then ``REINDEX`` (rebuilds every index from table content), then
+    ``PRAGMA integrity_check`` to see what state the file is actually in.
+
+    Returns a report dict with exactly these keys::
+
+        {"integrity_ok": bool, "vacuumed": bool, "reindexed": bool}
+
+    Honest reporting only: each step reports whether it *actually*
+    succeeded. A step that raises ``sqlite3.Error`` is reported as
+    ``False`` — never claimed as done. This function never raises for a
+    corrupt file; it reports what it observed.
+    """
+    report = {"integrity_ok": False, "vacuumed": False, "reindexed": False}
+    conn = sqlite3.connect(str(path), timeout=10.0, isolation_level=None)
+    try:
+        try:
+            conn.execute("VACUUM")
+            report["vacuumed"] = True
+        except sqlite3.Error:
+            report["vacuumed"] = False
+        try:
+            conn.execute("REINDEX")
+            report["reindexed"] = True
+        except sqlite3.Error:
+            report["reindexed"] = False
+        try:
+            rows = conn.execute("PRAGMA integrity_check").fetchall()
+            report["integrity_ok"] = bool(rows) and all(
+                str(row[0]).lower() == "ok" for row in rows
+            )
+        except sqlite3.Error:
+            report["integrity_ok"] = False
+    finally:
+        conn.close()
+    return report
+
+
 class PersistentMemoryStore:
     """SQLite-backed memory store for all wyrdforge MemoryRecord types.
 
@@ -109,7 +154,11 @@ class PersistentMemoryStore:
     def _init_schema(self) -> None:
         # Guarded open: a corrupt DB is quarantined (announced once) and a
         # fresh one created — the constructor never crashes on bad bytes.
-        conn, _recovered = open_or_quarantine(self._db_path, current_version=1)
+        # open_verified_state_db also runs PRAGMA integrity_check, catching
+        # bit-rot inside data pages that a header-only open would miss.
+        conn, _recovered = open_verified_state_db(
+            self._db_path, current_version=CURRENT_SCHEMA_VERSION
+        )
         with conn:
             conn.executescript(_SCHEMA)
 
