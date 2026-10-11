@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from wyrdforge.models.common import ApprovalState, StoreName, WritePolicy
+from wyrdforge.models.common import WritePolicy
 from wyrdforge.models.memory import (
     CanonicalFactRecord,
     ContradictionContent,
@@ -130,14 +130,13 @@ class ContradictionDetector:
             pass
 
     def find_open_contradictions(self) -> list[ContradictionRecord]:
-        """Return all unresolved ContradictionRecords."""
-        records = self._store.list_by_record_type("contradiction", store=StoreName.WYRD.value)
-        open_ones = []
-        for r in records:
-            if isinstance(r, ContradictionRecord):
-                if r.content.structured_payload.resolution_state == "open":
-                    open_ones.append(r)
-        return open_ones
+        """Return all unresolved ContradictionRecords.
+
+        SQL pushdown: the store filters on ``record_type``/``store`` (indexed)
+        plus ``resolution_state='open'`` via ``json_extract`` in a single
+        query — no full-table deserialization in Python.
+        """
+        return self._store.find_open_contradictions()
 
     def resolve(self, contradiction_record_id: str, *, preferred_record_id: str) -> bool:
         """Mark a contradiction as resolved, preferring a specific record.
@@ -174,19 +173,76 @@ class ContradictionDetector:
     def _find_existing_canonical_facts(
         self, subject_id: str, fact_key: str
     ) -> list[CanonicalFactRecord]:
-        all_canonical = self._store.list_by_record_type(
-            "canonical_fact", store=StoreName.MIMIR.value
-        )
-        results = []
-        for r in all_canonical:
-            if not isinstance(r, CanonicalFactRecord):
-                continue
-            if r.truth.approval_state == ApprovalState.QUARANTINED:
-                continue
+        # SQL pushdown: the store filters on indexed columns + json_extract
+        # in one query instead of deserializing the whole MIMIR store.
+        return self._store.find_canonical_facts(subject_id, fact_key)
+
+    def check_many(
+        self, records: list[CanonicalFactRecord]
+    ) -> list[ContradictionRecord]:
+        """Check a batch of canonical facts for conflicts in one round-trip.
+
+        Fetches all candidate existing facts for the batch's distinct
+        (subject_id, fact_key) groups with a single multi-key SQL query,
+        then applies the same per-record conflict logic as
+        :meth:`check_and_record` in batch order.  Records quarantined
+        during the batch are tracked in memory so later batch entries see
+        the same post-quarantine view they would get from sequential
+        store re-reads.  Candidate visibility matches sequential calls
+        exactly: batch peers already in the store are visible to both paths
+        (and to each other); peers not yet added are visible to neither.
+        Side effects (contradiction writes, quarantines,
+        ``contradiction.detected`` emission) match sequential calls.
+        """
+        if not records:
+            return []
+
+        def _pair(r: CanonicalFactRecord) -> tuple[str, str]:
             payload = r.content.structured_payload
-            if payload.fact_subject_id == subject_id and payload.fact_key == fact_key:
-                results.append(r)
-        return results
+            return (payload.fact_subject_id, payload.fact_key)
+
+        existing_by_pair = self._store.find_canonical_facts_many(
+            [_pair(r) for r in records]
+        )
+        quarantined_ids: set[str] = set()
+        conflicts: list[ContradictionRecord] = []
+
+        for new_record in records:
+            new_payload = new_record.content.structured_payload
+            new_value = new_payload.fact_value
+            candidates = existing_by_pair.get(_pair(new_record), [])
+            for existing_record in candidates:
+                if existing_record.record_id == new_record.record_id:
+                    continue  # same record
+                if existing_record.record_id in quarantined_ids:
+                    continue  # quarantined earlier in this batch
+                if existing_record.content.structured_payload.fact_value == new_value:
+                    continue  # same value — no conflict
+
+                contradiction = self._create_contradiction(new_record, existing_record)
+                self._store.add(contradiction)
+
+                weaker = self._weaker_of(new_record, existing_record)
+                self._store.quarantine(weaker.record_id)
+                quarantined_ids.add(weaker.record_id)
+
+                conflicts.append(contradiction)
+
+        if conflicts:
+            self._emit(
+                "contradiction.detected",
+                {
+                    "count": len(conflicts),
+                    "fact_ids": [
+                        *(r.record_id for r in records),
+                        *[
+                            c.content.structured_payload.claim_b_record_id
+                            for c in conflicts
+                        ],
+                    ],
+                },
+            )
+        return conflicts
 
     def _weaker_of(self, a: MemoryRecord, b: MemoryRecord) -> MemoryRecord:
         return a if a.truth.confidence <= b.truth.confidence else b

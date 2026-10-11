@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
-from wyrdforge.models.common import ApprovalState, WritePolicy
+from wyrdforge.models.common import ApprovalState, StoreName, WritePolicy
 from wyrdforge.models.memory import (
     CanonicalFactRecord,
     ContradictionRecord,
@@ -517,6 +517,120 @@ class PersistentMemoryStore:
                 params,
             ).fetchall()
         return [_deserialize_record(json.loads(r["data_json"])) for r in rows]
+
+    # ------------------------------------------------------------------
+    # SQL-pushdown queries (Gullinbursti wedge — filter in the DB instead
+    # of deserializing the whole store in Python)
+    # ------------------------------------------------------------------
+
+    def find_canonical_facts(
+        self,
+        subject_id: str,
+        fact_key: str,
+        *,
+        exclude_quarantined: bool = True,
+    ) -> list[CanonicalFactRecord]:
+        """Return non-quarantined canonical facts for one subject+key.
+
+        Filters on the indexed ``record_type``/``store`` columns and on the
+        structured payload via ``json_extract`` — the caller pays for one
+        SQL query and deserializes only matching rows, not the whole MIMIR
+        store.  ``subject_id``/``fact_key`` are bound parameters (never
+        interpolated), so JSON path or text content cannot break out of
+        the query.
+        """
+        clauses = ["record_type=?", "store=?"]
+        params: list = ["canonical_fact", StoreName.MIMIR.value]
+        if exclude_quarantined:
+            clauses.append("approval_state != ?")
+            params.append(ApprovalState.QUARANTINED.value)
+        clauses.append(
+            "json_extract(data_json, '$.content.structured_payload.fact_subject_id') = ?"
+        )
+        params.append(subject_id)
+        clauses.append(
+            "json_extract(data_json, '$.content.structured_payload.fact_key') = ?"
+        )
+        params.append(fact_key)
+        where = "WHERE " + " AND ".join(clauses)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT data_json FROM memory_records {where} ORDER BY created_at",
+                params,
+            ).fetchall()
+        results = [
+            _deserialize_record(json.loads(r["data_json"])) for r in rows
+        ]
+        return [r for r in results if isinstance(r, CanonicalFactRecord)]
+
+    def find_canonical_facts_many(
+        self,
+        pairs: list[tuple[str, str]],
+        *,
+        exclude_quarantined: bool = True,
+    ) -> dict[tuple[str, str], list[CanonicalFactRecord]]:
+        """One-query lookup of canonical facts for many (subject, key) pairs.
+
+        Issues a single SQL statement (OR-chained per-pair tuple matches) so
+        a batch of N checks costs one round-trip instead of N.  Returns a
+        dict mapping each requested pair to its matching records; pairs
+        with no matches map to ``[]``.
+        """
+        unique_pairs = list(dict.fromkeys(pairs))
+        result: dict[tuple[str, str], list[CanonicalFactRecord]] = {
+            pair: [] for pair in unique_pairs
+        }
+        if not unique_pairs:
+            return result
+        clauses = ["record_type=?", "store=?"]
+        params: list = ["canonical_fact", StoreName.MIMIR.value]
+        if exclude_quarantined:
+            clauses.append("approval_state != ?")
+            params.append(ApprovalState.QUARANTINED.value)
+        pair_clauses = []
+        for subject_id, fact_key in unique_pairs:
+            pair_clauses.append(
+                "(json_extract(data_json, '$.content.structured_payload.fact_subject_id') = ?"
+                " AND json_extract(data_json, '$.content.structured_payload.fact_key') = ?)"
+            )
+            params.extend([subject_id, fact_key])
+        clauses.append("(" + " OR ".join(pair_clauses) + ")")
+        where = "WHERE " + " AND ".join(clauses)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT data_json FROM memory_records {where} ORDER BY created_at",
+                params,
+            ).fetchall()
+        for r in rows:
+            record = _deserialize_record(json.loads(r["data_json"]))
+            if not isinstance(record, CanonicalFactRecord):
+                continue
+            payload = record.content.structured_payload
+            pair = (payload.fact_subject_id, payload.fact_key)
+            if pair in result:
+                result[pair].append(record)
+        return result
+
+    def find_open_contradictions(self) -> list[ContradictionRecord]:
+        """Return unresolved ContradictionRecords, filtered in SQL.
+
+        One query over the indexed ``record_type``/``store`` columns plus a
+        ``json_extract`` on ``resolution_state`` — no full-table
+        deserialization.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM memory_records "
+                "WHERE record_type=? AND store=? "
+                "AND json_extract(data_json, '$.content.structured_payload.resolution_state') = ? "
+                "ORDER BY created_at",
+                ("contradiction", StoreName.WYRD.value, "open"),
+            ).fetchall()
+        return [
+            r
+            for r in (_deserialize_record(json.loads(row["data_json"])) for row in rows)
+            if isinstance(r, ContradictionRecord)
+        ]
 
     def count(self, *, store: str | None = None) -> int:
         where = "WHERE store=?" if store else ""
