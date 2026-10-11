@@ -13,7 +13,12 @@ Guarantees:
   wildcard subscribers, each in subscription order), and per-topic FIFO by the
   bus-scoped ``seq`` counter.
 * One ``threading.RLock`` guards all mutable state; subscribers may
-  publish / (un)subscribe re-entrantly.
+  publish / (un)subscribe re-entrantly. Dusk slice 11: a re-entrant
+  publish to the SAME topic from inside a subscriber callback is deferred
+  until the in-progress delivery completes (still synchronously, before
+  the outer publish returns), so per-topic FIFO is never inverted; the
+  deferred call itself returns 0 and its deliveries count toward the
+  outermost call's return value.
 * A raising subscriber is isolated: the error is logged, recorded in the
   internal failure list (``_take_failures``) and the bounded dead-letter queue
   (slice 6), and remaining subscribers still receive the event. ``publish()``
@@ -144,6 +149,21 @@ class EventBus:
         # subscription change mid-batch invalidates the cache and the batch
         # keeps exact N-publish semantics.
         self._sub_version = 0
+        # Dusk slice 11 (audit fix): same-topic re-entrant publish deferral.
+        # A subscriber that publishes to the SAME topic from inside its own
+        # callback would otherwise invert per-topic FIFO for subscribers
+        # later in the delivery order (they would see the inner envelope
+        # before the outer one). Such publishes are queued in _deferred and
+        # drained, in FIFO order, once the outermost in-progress delivery
+        # completes — still synchronously, before publish()/publish_many()
+        # return. _active_topics holds topics with a delivery loop on the
+        # stack; _delivery_depth counts nested delivery loops (only the
+        # same thread can nest: the RLock is held for the whole publish).
+        self._active_topics: set[str] = set()
+        self._delivery_depth = 0
+        self._deferred: deque[
+            tuple[str, dict[str, Any], str, str | None]
+        ] = deque()
         # Slice 4 — internal failure list, drained via _take_failures().
         self._failures: list[dict[str, Any]] = []
         # Slice 6 — bounded dead-letter queue (oldest dropped on overflow).
@@ -384,6 +404,13 @@ class EventBus:
         subscribers). Raises ``KeyError`` for unregistered topics (or
         wildcard patterns) and ``TypeError`` for payloads that fail the
         topic's schema; never raises because of a subscriber exception.
+
+        Dusk slice 11: a re-entrant publish to the SAME topic from inside a
+        subscriber callback is deferred until the in-progress delivery
+        completes (per-topic FIFO would otherwise invert for later
+        subscribers). The deferred publish is fully applied before this
+        call returns and its deliveries count toward the OUTERMOST
+        publish's return value; the deferred call itself returns 0.
         """
         self._ensure_open()
         if self._is_wildcard(topic):
@@ -391,24 +418,60 @@ class EventBus:
         with self._lock:
             if topic not in self._schemas:
                 raise KeyError(f"Unknown topic: {topic!r}")
-            envelope = self._build_envelope(topic, payload, source, turn_id)
-            metrics = self._metrics[topic]
-            metrics["published"] += 1
-            buf = self._buffers[topic]
-            if buf is not None:
-                buf.append(envelope)
-            # Snapshot in subscription order: exact first, then wildcards.
-            # Prefixes were precomputed at subscribe() (dusk slice 5).
-            targets: list[Subscriber] = [fn for _, fn in self._subs[topic]]
-            for _, _pattern, prefix, fn in self._wildcards:
-                if topic.startswith(prefix):
-                    targets.append(fn)
-            delivered = 0
+            return self._publish_locked(topic, payload, source, turn_id)
+
+    def _publish_locked(
+        self,
+        topic: str,
+        payload: dict[str, Any],
+        source: str,
+        turn_id: str | None,
+    ) -> int:
+        """Single-envelope publish; caller holds the lock, topic validated."""
+        # Dusk slice 11: defer a re-entrant publish to a topic that already
+        # has a delivery loop on the stack — delivering it immediately would
+        # hand the inner envelope to not-yet-served subscribers before the
+        # outer envelope (per-topic FIFO inversion). The deferred publish is
+        # fully applied (fresh seq, buffer append, metrics, delivery) when
+        # the outermost delivery completes, so the call stays synchronous;
+        # it reports 0 because its deliveries have not happened yet — they
+        # are counted in the outermost call's return value instead.
+        if topic in self._active_topics:
+            self._deferred.append((topic, payload, source, turn_id))
+            return 0
+        envelope = self._build_envelope(topic, payload, source, turn_id)
+        metrics = self._metrics[topic]
+        metrics["published"] += 1
+        buf = self._buffers[topic]
+        if buf is not None:
+            buf.append(envelope)
+        # Snapshot in subscription order: exact first, then wildcards.
+        # Prefixes were precomputed at subscribe() (dusk slice 5).
+        targets: list[Subscriber] = [fn for _, fn in self._subs[topic]]
+        for _, _pattern, prefix, fn in self._wildcards:
+            if topic.startswith(prefix):
+                targets.append(fn)
+        self._active_topics.add(topic)
+        self._delivery_depth += 1
+        delivered = 0
+        try:
             for fn in targets:
                 if self._deliver(fn, envelope):
                     delivered += 1
                     metrics["delivered"] += 1
-            return delivered
+        finally:
+            self._delivery_depth -= 1
+            self._active_topics.discard(topic)
+        if self._delivery_depth == 0:
+            # Outermost delivery finished: drain deferred same-topic
+            # publishes in FIFO order. Each is a full publish; a further
+            # re-entrant same-topic publish inside the drain re-defers.
+            # A re-entrant close() drops the remainder (the bus is down).
+            while self._deferred and not self._closed:
+                t, p, s, tid = self._deferred.popleft()
+                delivered += self._publish_locked(t, p, s, tid)
+            self._deferred.clear()
+        return delivered
 
     def publish_many(
         self,
@@ -452,6 +515,12 @@ class EventBus:
                     )
                 if topic not in self._schemas:
                     raise KeyError(f"Unknown topic: {topic!r}")
+                # Dusk slice 11: same deferral as _publish_locked — a
+                # re-entrant same-topic publish from a subscriber would
+                # otherwise invert per-topic FIFO for later subscribers.
+                if topic in self._active_topics:
+                    self._deferred.append((topic, payload, source, turn_id))
+                    continue
                 entry = cache.get(topic)
                 if entry is None or entry[3] != self._sub_version:
                     targets: list[Subscriber] = [
@@ -472,10 +541,23 @@ class EventBus:
                 metrics["published"] += 1
                 if buf is not None:
                     buf.append(envelope)
-                for fn in targets:
-                    if self._deliver(fn, envelope):
-                        total += 1
-                        metrics["delivered"] += 1
+                self._active_topics.add(topic)
+                self._delivery_depth += 1
+                try:
+                    for fn in targets:
+                        if self._deliver(fn, envelope):
+                            total += 1
+                            metrics["delivered"] += 1
+                finally:
+                    self._delivery_depth -= 1
+                    self._active_topics.discard(topic)
+            if self._delivery_depth == 0:
+                # Drain deferred same-topic publishes (see _publish_locked);
+                # each is a full publish, counted in this batch's total.
+                while self._deferred and not self._closed:
+                    t, p, s, tid = self._deferred.popleft()
+                    total += self._publish_locked(t, p, s, tid)
+                self._deferred.clear()
             return total
 
     # -- slice 4 — failure handoff -----------------------------------------
