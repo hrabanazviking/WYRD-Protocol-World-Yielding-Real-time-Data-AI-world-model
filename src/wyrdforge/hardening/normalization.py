@@ -71,7 +71,11 @@ def safe_persona_id(name: str | bytes | None) -> str:
     result = re.sub(r"[^a-z0-9_]", "_", result)
     result = re.sub(r"_+", "_", result)
     result = result.strip("_")
-    return result[:64]
+    # Truncation can cut at an underscore boundary and leave a trailing "_"
+    # the strip above never saw; re-strip so the output is always a fixpoint
+    # (normalize(normalize(x)) == normalize(x)).
+    result = result[:64].rstrip("_")
+    return result
 
 
 def _strip_controls(s: str) -> str:
