@@ -36,9 +36,30 @@ each later entry is the post-step value. So contradict(0.9) seeds
 """
 from __future__ import annotations
 
+import math
+
 CONFIDENCE_STEP_DOWN: float = 0.2
 CONFIDENCE_STEP_UP: float = 0.1
 UNCERTAINTY_THRESHOLD: float = 0.3
+
+
+def _require_finite_confidence(value: float, *, where: str) -> float:
+    """Reject non-numeric or non-finite confidence loudly.
+
+    NaN must never silently become 1.0 (maximum certainty from garbage
+    input — the old ``_clamp`` mapped NaN to 1.0 via min/max comparison
+    semantics), and None must never surface as a cryptic arithmetic
+    TypeError. History entries seeded by these entry points inherit the
+    guarantee: a NaN can never be written into a confidence history.
+    """
+    if not isinstance(value, (int, float)):
+        raise TypeError(
+            f"{where}: confidence must be a number, "
+            f"got {type(value).__name__}"
+        )
+    if not math.isfinite(value):
+        raise ValueError(f"{where}: confidence must be finite, got {value!r}")
+    return float(value)
 
 
 def _clamp(value: float) -> float:
@@ -63,6 +84,7 @@ def contradict(
 
     Returns (new_confidence, new_history). Pure: inputs are never mutated.
     """
+    confidence = _require_finite_confidence(confidence, where="contradict")
     hist = list(history) if history else [confidence]
     new_confidence = _clamp(confidence - CONFIDENCE_STEP_DOWN)
     hist.append(new_confidence)
@@ -80,6 +102,7 @@ def reconfirm(
 
     Returns (new_confidence, new_history). Pure: inputs are never mutated.
     """
+    confidence = _require_finite_confidence(confidence, where="reconfirm")
     hist = list(history) if history else [confidence]
     new_confidence = _clamp(confidence + CONFIDENCE_STEP_UP)
     hist.append(new_confidence)
@@ -93,6 +116,7 @@ def is_uncertain(confidence: float) -> bool:
     asserted. This strictness is load-bearing — see the roadmap-arithmetic
     note in the module docstring.
     """
+    confidence = _require_finite_confidence(confidence, where="is_uncertain")
     return confidence < UNCERTAINTY_THRESHOLD
 
 

@@ -21,10 +21,21 @@ class TruthCalibrator:
     )
 
     def evaluate(self, case: EvalCase, assistant_text: str) -> EvalResult:
+        if not isinstance(assistant_text, str):
+            raise TypeError(
+                "assistant_text must be str, "
+                f"got {type(assistant_text).__name__}"
+            )
         lower = assistant_text.lower()
         factual_score = 3
         factual_reasons = []
         for forbidden in case.setup.truth_packet.forbidden_assumptions:
+            if not forbidden or not forbidden.strip():
+                # Degenerate marker: the empty string is a substring of every
+                # text, so an empty/whitespace-only forbidden assumption would
+                # force factual integrity to 0 on EVERY evaluation. Such an
+                # entry can never be a meaningful marker — skip it.
+                continue
             if forbidden.lower() in lower:
                 factual_score = min(factual_score, 0)
                 factual_reasons.append(f"forbidden assumption echoed: {forbidden}")
