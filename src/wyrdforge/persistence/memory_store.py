@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import operator
 import sqlite3
+import threading
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, NamedTuple
 
 from wyrdforge.models.common import ApprovalState, WritePolicy
 from wyrdforge.models.memory import (
@@ -59,6 +60,24 @@ def _deserialize_record(data: dict) -> MemoryRecord:
     record_type = data.get("record_type", "")
     cls = _RECORD_REGISTRY.get(record_type, MemoryRecord)
     return cls.model_validate(data)
+
+
+class _ScoredCandidate(NamedTuple):
+    """Scoring inputs for one search candidate — no deserialized record.
+
+    Slice 7: ``title``/``summary``/``lexical_terms`` come from the FTS5
+    table (or ``json_extract`` on the LIKE-fallback path), ``confidence``
+    from the ``memory_records`` column, ``default_priority`` from
+    ``json_extract``. The full ``data_json`` blob is fetched only for
+    the final top-``limit`` records.
+    """
+
+    record_id: str
+    title: str
+    summary: str
+    lexical_terms: str  # space-joined, as stored in memory_fts
+    default_priority: float
+    confidence: float
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +181,8 @@ class PersistentMemoryStore:
     def __init__(self, db_path: str | Path, *, bus: "EventBus | None" = None) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Slice 8: one cached SQLite connection per thread (see _connect).
+        self._local = threading.local()
         self._init_schema()
         # Opt-in inner-communications wiring: bus=None preserves the exact
         # historical behavior; a bus wires inserts into the EventBus.
@@ -184,7 +205,8 @@ class PersistentMemoryStore:
         with conn:
             conn.executescript(_SCHEMA)
 
-    def _connect(self) -> sqlite3.Connection:
+    def _new_connection(self) -> sqlite3.Connection:
+        """Open a fresh, fully-pragma'd SQLite connection (slice 8)."""
         conn = sqlite3.connect(str(self._db_path), timeout=10.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -192,6 +214,49 @@ class PersistentMemoryStore:
         conn.execute("PRAGMA busy_timeout=5000")      # wait up to 5 s on locked DB
         conn.execute("PRAGMA auto_vacuum=INCREMENTAL") # reclaim space incrementally
         return conn
+
+    def _connect(self) -> sqlite3.Connection:
+        """Return this thread's cached SQLite connection (slice 8).
+
+        One connection per thread, created lazily via :meth:`_new_connection`
+        with the same PRAGMAs as before (WAL journal mode, foreign keys,
+        5 s busy timeout, incremental auto-vacuum). Connections are never
+        shared across threads — ``sqlite3`` connections are not thread-safe
+        — so each thread gets its own via :class:`threading.local`.
+
+        WAL-safety: every op still runs inside ``with self._connect()``,
+        which commits (or rolls back) at block exit, so no transaction is
+        left open to pin the WAL and stall checkpoints. Concurrent writers
+        serialize on SQLite's own locks with the 5 s busy timeout, exactly
+        as with per-op connections.
+
+        Callers keep the historical contract: ``with self._connect()`` —
+        the context manager commits/rolls back but does NOT close. Use
+        :meth:`close` to release the current thread's cached connection.
+
+        Assumption: the DB file is not replaced out from under the store;
+        if you move/recreate the file, construct a new store.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._new_connection()
+            self._local.conn = conn
+        return conn
+
+    def close(self) -> None:
+        """Close the calling thread's cached connection, if one exists.
+
+        Safe to call repeatedly. Other threads' cached connections are
+        unaffected; each thread should close its own (threads that simply
+        exit release theirs via garbage collection of the thread-local).
+        The next op on this thread transparently opens a new connection.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            finally:
+                self._local.conn = None
 
     def integrity_check(self) -> bool:
         """Run SQLite's integrity_check pragma and return True if the DB is healthy.
@@ -364,6 +429,17 @@ class PersistentMemoryStore:
 
         Uses FTS5 for candidate retrieval, then applies the same
         multi-factor scoring as InMemoryRecordStore.
+
+        Slice 7: scoring runs on the FTS5 columns (``title``,
+        ``summary``, ``lexical_terms``) plus the ``confidence`` column
+        and ``json_extract`` of ``retrieval.default_priority`` — no
+        candidate is deserialized to be scored. Only the final
+        top-``limit`` records have their ``data_json`` fetched and
+        deserialized.
+
+        Slice 17: score ties break deterministically by ``record_id``
+        (ascending), so ranking no longer depends on candidate load
+        order.
         """
         terms = validate_search_query(query)
         if not terms:
@@ -383,53 +459,143 @@ class PersistentMemoryStore:
 
             if not candidate_ids:
                 # Fallback: LIKE scan on title+summary if FTS finds nothing
-                like_clauses = " OR ".join(
-                    ["(LOWER(data_json) LIKE ?)"] * len(terms)
-                )
-                like_params = [f"%{t}%" for t in terms]
-                store_clause = "AND store=?" if store else ""
-                store_params = [store] if store else []
-                rows = conn.execute(
-                    f"SELECT data_json FROM memory_records WHERE ({like_clauses}) {store_clause} LIMIT 50",
-                    like_params + store_params,
-                ).fetchall()
-                candidates = [_deserialize_record(json.loads(r["data_json"])) for r in rows]
+                candidates = self._fallback_scoring_fields(conn, terms, store)
             else:
-                # Load candidates
-                placeholders = ",".join("?" * len(candidate_ids))
-                extra_clauses = []
-                extra_params: list = list(candidate_ids)
-                if store:
-                    extra_clauses.append("store=?")
-                    extra_params.append(store)
-                if approval_state:
-                    extra_clauses.append("approval_state=?")
-                    extra_params.append(approval_state)
-                if exclude_expired:
-                    extra_clauses.append(f"(expires_at IS NULL OR expires_at > ?)")
-                    extra_params.append(_now_iso())
-                extra_where = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
-                rows = conn.execute(
-                    f"SELECT data_json FROM memory_records "
-                    f"WHERE record_id IN ({placeholders}){extra_where}",
-                    extra_params,
-                ).fetchall()
-                candidates = [_deserialize_record(json.loads(r["data_json"])) for r in rows]
+                candidates = self._fts_scoring_fields(
+                    conn, candidate_ids, store, approval_state, exclude_expired
+                )
 
-        # Score candidates
-        scored: list[tuple[float, MemoryRecord]] = []
-        for record in candidates:
-            haystack = " ".join([
-                record.content.title,
-                record.content.summary,
-                " ".join(record.retrieval.lexical_terms),
-            ]).lower()
+        # Score candidates from their FTS/column fields — no deserialization.
+        # Formula identical to the pre-slice-7 path:
+        #   overlap * 1.5 + default_priority + confidence
+        scored: list[tuple[float, str]] = []
+        for cand in candidates:
+            haystack = " ".join(
+                [cand.title, cand.summary, cand.lexical_terms]
+            ).lower()
             overlap = sum(1 for t in terms if t in haystack)
-            score = overlap * 1.5 + record.retrieval.default_priority + record.truth.confidence
+            score = overlap * 1.5 + cand.default_priority + cand.confidence
             if score > 0:
-                scored.append((score, record))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [r for _, r in scored[:limit]]
+                scored.append((score, cand.record_id))
+        # Slice 17 — deterministic tie-break by record_id.
+        scored.sort(key=lambda s: (-s[0], s[1]))
+        top_ids = [record_id for _, record_id in scored[:limit]]
+        if not top_ids:
+            return []
+
+        # Deserialize ONLY the final top-`limit` records, in ranked order.
+        with self._connect() as conn:
+            placeholders = ",".join("?" * len(top_ids))
+            rows = conn.execute(
+                "SELECT record_id, data_json FROM memory_records "
+                f"WHERE record_id IN ({placeholders})",
+                top_ids,
+            ).fetchall()
+        blobs = {r["record_id"]: r["data_json"] for r in rows}
+        return [
+            _deserialize_record(json.loads(blobs[record_id]))
+            for record_id in top_ids
+            if record_id in blobs
+        ]
+
+    def _fts_scoring_fields(
+        self,
+        conn: sqlite3.Connection,
+        candidate_ids: list[str],
+        store: str | None,
+        approval_state: str | None,
+        exclude_expired: bool,
+    ) -> list[_ScoredCandidate]:
+        """Fetch scoring fields for FTS candidates (slice 7).
+
+        ``title``/``summary``/``lexical_terms`` come from the ``memory_fts``
+        table (synced on every ``add``/``delete``); ``confidence`` from the
+        ``memory_records`` column; ``default_priority`` via ``json_extract``.
+        Filter clauses mirror the pre-slice-7 candidate query exactly.
+        """
+        placeholders = ",".join("?" * len(candidate_ids))
+        extra_clauses = []
+        extra_params: list = list(candidate_ids)
+        if store:
+            extra_clauses.append("m.store=?")
+            extra_params.append(store)
+        if approval_state:
+            extra_clauses.append("m.approval_state=?")
+            extra_params.append(approval_state)
+        if exclude_expired:
+            extra_clauses.append("(m.expires_at IS NULL OR m.expires_at > ?)")
+            extra_params.append(_now_iso())
+        extra_where = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
+        rows = conn.execute(
+            "SELECT m.record_id AS record_id, "
+            "f.title AS title, f.summary AS summary, "
+            "f.lexical_terms AS lexical_terms, "
+            "COALESCE(json_extract(m.data_json, '$.retrieval.default_priority'), 0.0) "
+            "AS default_priority, "
+            "m.confidence AS confidence "
+            "FROM memory_records m "
+            "JOIN memory_fts f ON f.record_id = m.record_id "
+            f"WHERE m.record_id IN ({placeholders}){extra_where}",
+            extra_params,
+        ).fetchall()
+        return [
+            _ScoredCandidate(
+                record_id=r["record_id"],
+                title=r["title"] or "",
+                summary=r["summary"] or "",
+                lexical_terms=r["lexical_terms"] or "",
+                default_priority=float(r["default_priority"]),
+                confidence=float(r["confidence"]),
+            )
+            for r in rows
+        ]
+
+    def _fallback_scoring_fields(
+        self,
+        conn: sqlite3.Connection,
+        terms: list[str],
+        store: str | None,
+    ) -> list[_ScoredCandidate]:
+        """Fetch scoring fields for the LIKE fallback path (slice 7).
+
+        No FTS row exists for these candidates, so ``title``/``summary``/
+        ``lexical_terms``/``default_priority`` come from ``json_extract``
+        instead of FTS columns. WHERE clause and LIMIT 50 mirror the
+        pre-slice-7 fallback exactly (store filter only — no
+        approval_state / expiry filtering, as before).
+        """
+        like_clauses = " OR ".join(["(LOWER(data_json) LIKE ?)"] * len(terms))
+        like_params = [f"%{t}%" for t in terms]
+        store_clause = "AND store=?" if store else ""
+        store_params = [store] if store else []
+        rows = conn.execute(
+            "SELECT record_id, "
+            "json_extract(data_json, '$.content.title') AS title, "
+            "json_extract(data_json, '$.content.summary') AS summary, "
+            "json_extract(data_json, '$.retrieval.lexical_terms') AS lexical_terms_json, "
+            "COALESCE(json_extract(data_json, '$.retrieval.default_priority'), 0.0) "
+            "AS default_priority, "
+            "confidence "
+            f"FROM memory_records WHERE ({like_clauses}) {store_clause} LIMIT 50",
+            like_params + store_params,
+        ).fetchall()
+        candidates = []
+        for r in rows:
+            try:
+                terms_list = json.loads(r["lexical_terms_json"] or "[]")
+            except (ValueError, TypeError):
+                terms_list = []
+            candidates.append(
+                _ScoredCandidate(
+                    record_id=r["record_id"],
+                    title=r["title"] or "",
+                    summary=r["summary"] or "",
+                    lexical_terms=" ".join(terms_list),
+                    default_priority=float(r["default_priority"]),
+                    confidence=float(r["confidence"]),
+                )
+            )
+        return candidates
 
     # ------------------------------------------------------------------
     # State transitions

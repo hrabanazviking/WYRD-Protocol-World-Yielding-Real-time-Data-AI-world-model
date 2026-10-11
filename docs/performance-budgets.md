@@ -12,9 +12,11 @@ feed_replay_us_per_event: 20
 memory_parse_s: 5
 bridge_run_s: 30
 mirror_write_s: 1
+bus_publish_us_per_event: 40
+bus_replay_merge_ms: 15
 ```
 
-## The four budgets
+## The budgets (B1–B6)
 
 | # | Path | Budget | Owner | Measured by |
 |---|---|---|---|---|
@@ -22,6 +24,8 @@ mirror_write_s: 1
 | B2 | Memory parse (attach phase) — `parse_memory_beliefs` (`verdandi_bridge.py:1290`), `home=`-parameterized so a synthetic tree is first-class | ≤ 5 s at current corpus size | repo — `tests/test_performance_budgets.py` (synthetic tree sized to the corpus below, warmup, median of 3) | pytest, every suite run |
 | B3 | Full bridge run (replay + attach + senses + memory parse) | ≤ 30 s wall | **Verdandi-side** 1-minute heartbeat worker (`wyrd-mirror-bridge` cron) — outside this repo | existing heartbeat reporting; watched by the T4-P3 seven-day proof |
 | B4 | Mirror JSON write (`wyrd_mirror.json`) | ≤ 1 s | **Verdandi-side** runner — outside this repo | existing heartbeat reporting |
+| B5 | EventBus publish throughput — `EventBus.publish` (`src/wyrdforge/runtime/events.py`) | ≤ 40 µs/event | repo — `tests/test_performance_budgets.py` (20k publishes, one subscriber, warmup, median of 3) | pytest, every suite run |
+| B6 | EventBus wildcard replay merge — `subscribe("bench.*", replay=True)` over buffered envelopes | ≤ 15 ms for 20 topics × 500 events | repo — `tests/test_performance_budgets.py` (warmup, median of 3; asserts global seq order) | pytest, every suite run |
 
 B3 and B4 are the roadmap's own shape: the baselines describe the
 heartbeat worker, and this slice does not smuggle Verdandi-side code
@@ -38,6 +42,8 @@ context in `docs/scale-limits.md`, not enforced.
 | B2 memory parse | comfortably inside | 0.058 s at corpus size (median of 3); 0.675 s at 10× corpus | GREEN |
 | B3 full bridge run | comfortably inside the 120 s cron timeout | observed Verdandi-side (T4-P3 proof watching) | recorded |
 | B4 mirror write | — | observed Verdandi-side | recorded |
+| B5 bus publish | — (new 2026-10-11) | **~7.5 µs/event** (median of 3, 20k publishes, one subscriber) | GREEN, ~5x margin |
+| B6 bus replay merge | — (new 2026-10-11) | **~1.85 ms** for 20×500 events (median of 3; seq order verified) | GREEN, ~8x margin |
 
 ### Finding SLICE6-F1 — B1 exceeds its budget on this tree (2026-09-27)
 
