@@ -153,6 +153,33 @@ class ReportedSensationResult(StrictModel):
     status: str  # "fresh" | "stale"
 
 
+class RankedObservationResult(StrictModel):
+    """One observation ranked by salience (Phase D3).
+
+    The score is TRANSPARENT by construction: ``score`` is the
+    weighted sum of the three factors carried on this same model
+    (``recency``, ``bond_strength``, ``novelty`` — see
+    ``oracle/salience.py`` for the exact formula, weights, and each
+    factor's definition), so a caller can always see *why* a record
+    ranked where it did instead of trusting an opaque rank.
+    ``kind`` is the ObservationKind value; ``place_id`` is the
+    record's own place (None = placeless).
+    """
+
+    record_id: str
+    title: str
+    summary: str
+    observed_at: datetime
+    kind: str
+    place_id: str | None
+    speaker_id: str | None
+    participants: list[str] = Field(default_factory=list)
+    score: float
+    recency: float
+    bond_strength: float
+    novelty: float
+
+
 class RelationResult(StrictModel):
     """Faction membership and co-presence of an entity."""
 

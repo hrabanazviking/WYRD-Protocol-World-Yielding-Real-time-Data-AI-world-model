@@ -61,6 +61,33 @@ class BondGraphService:
                 edge.status = edge.status.__class__.ACTIVE
             return edge
 
+    def strength_between(self, entity_a: str, entity_b: str) -> float | None:
+        """Strongest bond strength between two entities, or None.
+
+        Phase D3 (additive): the read the Oracle's salience ranking
+        needs. Strength is the edge's existing
+        ``BondEdge.closeness_index()`` (mean of trust / warmth /
+        familiarity / vulnerability, in [0, 1]) — no new strength
+        notion is invented. Edges match in either direction
+        (``entity_a``/``entity_b`` are an unordered pair); when
+        several edges join the pair (different domains), the
+        strongest wins. None when the graph holds no edge between
+        them — "no bond known", which callers must not read as 0.
+        A self-pair (``entity_a == entity_b``) is always None: an
+        entity has no bond to itself in this graph.
+        """
+        with self._lock:
+            if entity_a == entity_b:
+                return None
+            pair = {entity_a, entity_b}
+            best: float | None = None
+            for edge in self.edges.values():
+                if {edge.entity_a, edge.entity_b} == pair:
+                    strength = edge.closeness_index()
+                    if best is None or strength > best:
+                        best = strength
+            return best
+
     def excerpt(self, bond_id: str) -> list[str]:
         with self._lock:
             edge = self.edges[bond_id]

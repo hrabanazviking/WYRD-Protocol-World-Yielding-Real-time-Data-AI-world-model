@@ -109,7 +109,12 @@ class PythonRPGBridge(BifrostBridge):
         self._bond_service = bond_service
         self._config = config or BridgeConfig()
 
-        self._oracle = PassiveOracle(world, memory_store, yggdrasil=yggdrasil)
+        # Phase D3: the bridge's bond service is wired into the
+        # Oracle so salience-ranked recall can read real bond
+        # strengths (additive kwarg; None keeps the neutral prior).
+        self._oracle = PassiveOracle(
+            world, memory_store, yggdrasil=yggdrasil, bond_service=bond_service
+        )
         self._engine = WritebackEngine(memory_store)
         self._detector = ContradictionDetector(memory_store)
         self._char_ctx = CharacterContext(

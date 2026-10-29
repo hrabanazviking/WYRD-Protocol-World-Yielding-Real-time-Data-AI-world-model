@@ -46,6 +46,19 @@ a stale reading reads as STALE, never as current. Felt and reported
 sensations are separate queries over separate stores: a report
 (another's claim) is never served as a feeling.
 
+Phase D3 (salience & filtered recall, roadmap §5.3) adds the
+memory-recall surface a live agent's context budget needs:
+    24. recent_observations — HUGIN observations filtered by place
+                        and/or kind, newest first (doc 04's explicit
+                        ask of the core)
+    25. recall_by_salience — the same filtered set ranked by a
+                        transparent salience score (recency × bond
+                        strength × novelty; see ``oracle/salience.py``)
+
+Both are opt-in additions: the context packet's default observation
+fetch keeps its exact pre-D3 behaviour (global, newest-first) unless
+a caller passes ``rank_by_salience=True`` to build_context_packet.
+
 The containment model (queries 1/2/6/7, hierarchy membership) is
 unchanged: ``get_nearby`` still means "shares my location node",
 never "is geometrically close". The two models compose — an entity
@@ -56,6 +69,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import wyrdforge.ecs.components.combat  # noqa: F401  (component registration)
 import wyrdforge.ecs.components.sensation  # noqa: F401  (component registration)
@@ -92,6 +106,7 @@ from wyrdforge.models.common import ApprovalState, StoreName
 from wyrdforge.models.memory import (
     CanonicalFactRecord,
     ContradictionRecord,
+    ObservationKind,
     ObservationRecord,
     PolicyRecord,
 )
@@ -105,17 +120,29 @@ from wyrdforge.oracle.models import (
     PolicySummary,
     PositionResult,
     ProximityResult,
+    RankedObservationResult,
     RelationResult,
     ReportedSensationResult,
     SensationResult,
     ThreatResult,
     WorldContextPacket,
 )
+from wyrdforge.oracle.salience import (
+    DEFAULT_HALF_LIFE_HOURS,
+    NEUTRAL_BOND_STRENGTH,
+    as_utc,
+    novelty_factor,
+    recency_factor,
+    salience_score,
+)
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
 from wyrdforge.services.self_correction import (
     format_confidence_history,
     is_uncertain,
 )
+
+if TYPE_CHECKING:
+    from wyrdforge.services.bond_graph_service import BondGraphService
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +156,12 @@ class PassiveOracle:
                       observations.
         yggdrasil:    Optional YggdrasilTree for richer spatial navigation.
                       When omitted, spatial queries fall back to component scans.
+        bond_service: Optional BondGraphService (Phase D3). When wired,
+                      ``recall_by_salience`` reads real bond strengths
+                      from it; when omitted, every observation's bond
+                      factor is the neutral prior (see
+                      ``oracle/salience.py``) — ranking still works,
+                      it just knows nothing about relationships.
 
     Thread-safety (Phase B1): every query that reads ECS state runs
     under ``world.lock`` for its whole duration, so each answer is one
@@ -153,10 +186,12 @@ class PassiveOracle:
         memory_store: PersistentMemoryStore,
         *,
         yggdrasil: YggdrasilTree | None = None,
+        bond_service: BondGraphService | None = None,
     ) -> None:
         self._world = world
         self._store = memory_store
         self._yggdrasil = yggdrasil
+        self._bond_service = bond_service
 
     # ------------------------------------------------------------------
     # Query 1: where_is
@@ -755,6 +790,197 @@ class PassiveOracle:
             return results
 
     # ------------------------------------------------------------------
+    # Queries 24–25: filtered + salience-ranked recall (Phase D3)
+    #
+    # Pure memory-store reads: no ECS state is consulted, so no
+    # world lock is taken (the store's per-thread connections are
+    # the thread-safety story, as for get_facts/search_facts). Time
+    # enters ONLY through the caller-supplied ``now`` (the B5/D1
+    # injectable-clock precedent): with the same store contents,
+    # bond graph, and ``now``, every answer is bit-reproducible.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_kind(kind: ObservationKind | str | None) -> ObservationKind | None:
+        if kind is None or isinstance(kind, ObservationKind):
+            return kind
+        return ObservationKind(kind)  # ValueError on an unknown kind — loud, not silent
+
+    def _observations_filtered(
+        self,
+        place_id: str | None,
+        kind: ObservationKind | None,
+    ) -> list[ObservationRecord]:
+        """All HUGIN observations matching the filters, newest first.
+
+        Ordering is total and deterministic: ``observed_at``
+        descending, ties broken by ``record_id`` ascending. (The
+        packet's private ``_fetch_recent_observations`` predates
+        this and is deliberately untouched — its ordering is the
+        pre-D3 behaviour the packet keeps by default.)
+        """
+        records = [
+            r for r in self._store.all(store=StoreName.HUGIN.value)
+            if isinstance(r, ObservationRecord)
+        ]
+        if place_id is not None:
+            records = [
+                r for r in records
+                if r.content.structured_payload.place_id == place_id
+            ]
+        if kind is not None:
+            records = [
+                r for r in records
+                if r.content.structured_payload.observation_kind == kind
+            ]
+        records.sort(
+            key=lambda r: (
+                -as_utc(r.content.structured_payload.observed_at).timestamp(),
+                r.record_id,
+            )
+        )
+        return records
+
+    @staticmethod
+    def _observation_summary(record: ObservationRecord) -> ObservationSummary:
+        payload = record.content.structured_payload
+        return ObservationSummary(
+            record_id=record.record_id,
+            title=record.content.title,
+            summary=record.content.summary,
+            observed_at=payload.observed_at,
+            speaker_id=payload.speaker_id,
+            participants=list(payload.participants),
+        )
+
+    def recent_observations(
+        self,
+        place_id: str | None = None,
+        kind: ObservationKind | str | None = None,
+        *,
+        limit: int = 10,
+    ) -> list[ObservationSummary]:
+        """Recent observations, filtered by place and/or kind.
+
+        Doc 04's explicit ask of the core ("What was just said?" —
+        Hugin observations at the current parcel, newest first; the
+        pre-D3 packet fetch was global and unfiltered). ``place_id``
+        matches the record's own ``place_id`` exactly; ``kind``
+        matches its ``ObservationKind`` (the enum or its value
+        string). Both filters combine (AND). Newest first, ties by
+        ``record_id``; at most ``limit`` results. An empty result
+        means no observation matches — never a fallback to the
+        unfiltered set.
+        """
+        if limit < 0:
+            raise ValueError(f"limit must be non-negative, got {limit}")
+        kind_norm = self._normalize_kind(kind)
+        records = self._observations_filtered(place_id, kind_norm)
+        return [self._observation_summary(r) for r in records[:limit]]
+
+    def _bond_factor(self, record: ObservationRecord, focus_entity_id: str | None) -> float:
+        """Bond factor for one record: strongest known bond between
+        the focus entity and the record's people (speaker +
+        participants), or the neutral prior when no bond is known.
+        """
+        if focus_entity_id is None or self._bond_service is None:
+            return NEUTRAL_BOND_STRENGTH
+        payload = record.content.structured_payload
+        people = {p for p in [payload.speaker_id, *payload.participants] if p}
+        people.discard(focus_entity_id)  # no bond to oneself
+        best: float | None = None
+        for person in people:
+            strength = self._bond_service.strength_between(focus_entity_id, person)
+            if strength is not None and (best is None or strength > best):
+                best = strength
+        return best if best is not None else NEUTRAL_BOND_STRENGTH
+
+    def recall_by_salience(
+        self,
+        place_id: str | None = None,
+        kind: ObservationKind | str | None = None,
+        *,
+        focus_entity_id: str | None = None,
+        limit: int = 10,
+        now: datetime | None = None,
+        half_life_hours: float = DEFAULT_HALF_LIFE_HOURS,
+    ) -> list[RankedObservationResult]:
+        """Observations ranked by salience (roadmap §5.3).
+
+        The place/kind-filtered set (same filters as
+        :meth:`recent_observations`), each record scored by the
+        transparent formula in ``oracle/salience.py`` — recency
+        (exponential decay at the injected ``now``) × bond strength
+        (toward ``focus_entity_id``, from the wired BondGraph;
+        neutral when unknown) × novelty (derived from the full
+        HUGIN history: earlier same-(kind, place) records make a
+        record less novel). Novelty is computed over the
+        UNFILTERED history — it is a property of what has happened,
+        not of the caller's current filter.
+
+        Ordering is total and deterministic: score descending
+        (the rounded score printed on each result), then
+        ``observed_at`` descending, then ``record_id`` ascending.
+        Every result carries its score AND its three factors.
+        """
+        if limit < 0:
+            raise ValueError(f"limit must be non-negative, got {limit}")
+        if half_life_hours <= 0:
+            raise ValueError(f"half_life_hours must be positive, got {half_life_hours}")
+        kind_norm = self._normalize_kind(kind)
+        moment = self._query_now(now)
+
+        # Novelty priors over the full history, counted in the
+        # deterministic (observed_at, record_id) ascending order: a
+        # record's prior count is the number of earlier records
+        # sharing its (kind, place).
+        history = self._observations_filtered(None, None)
+        chronological = sorted(
+            history,
+            key=lambda r: (
+                as_utc(r.content.structured_payload.observed_at).timestamp(),
+                r.record_id,
+            ),
+        )
+        prior_counts: dict[str, int] = {}
+        seen: dict[tuple[str, str | None], int] = {}
+        for record in chronological:
+            payload = record.content.structured_payload
+            key = (payload.observation_kind.value, payload.place_id)
+            prior_counts[record.record_id] = seen.get(key, 0)
+            seen[key] = seen.get(key, 0) + 1
+
+        filtered = [
+            r for r in history
+            if (place_id is None or r.content.structured_payload.place_id == place_id)
+            and (kind_norm is None or r.content.structured_payload.observation_kind == kind_norm)
+        ]
+        results: list[RankedObservationResult] = []
+        for record in filtered:
+            payload = record.content.structured_payload
+            recency = recency_factor(payload.observed_at, moment, half_life_hours=half_life_hours)
+            bond = round(self._bond_factor(record, focus_entity_id), 6)
+            novelty = novelty_factor(prior_counts[record.record_id])
+            results.append(RankedObservationResult(
+                record_id=record.record_id,
+                title=record.content.title,
+                summary=record.content.summary,
+                observed_at=payload.observed_at,
+                kind=payload.observation_kind.value,
+                place_id=payload.place_id,
+                speaker_id=payload.speaker_id,
+                participants=list(payload.participants),
+                score=salience_score(recency=recency, bond_strength=bond, novelty=novelty),
+                recency=recency,
+                bond_strength=bond,
+                novelty=novelty,
+            ))
+        results.sort(
+            key=lambda r: (-r.score, -as_utc(r.observed_at).timestamp(), r.record_id)
+        )
+        return results[:limit]
+
+    # ------------------------------------------------------------------
     # Query 8: search_facts
     # ------------------------------------------------------------------
 
@@ -779,6 +1005,9 @@ class PassiveOracle:
         include_policies: bool = True,
         include_observations: bool = True,
         max_observations: int = 5,
+        rank_by_salience: bool = False,
+        salience_focus_entity_id: str | None = None,
+        salience_now: datetime | None = None,
     ) -> WorldContextPacket:
         """Assemble an LLM-ready context bundle.
 
@@ -789,6 +1018,20 @@ class PassiveOracle:
             include_policies:   Include ORLOG policy records.
             include_observations: Include recent HUGIN observations.
             max_observations:   How many recent observations to include.
+            rank_by_salience:   Phase D3 opt-in: order the packet's
+                                observations by salience (see
+                                :meth:`recall_by_salience`) instead of
+                                the default global newest-first. The
+                                packet model itself is unchanged — the
+                                scores live on the recall surface; the
+                                packet only inherits the ORDER. Default
+                                False = the exact pre-D3 behaviour.
+            salience_focus_entity_id: Bond focus for the salience
+                                ranking (defaults to the first focus
+                                entity when ranking is opted into).
+            salience_now:       Injected clock for the ranking's
+                                recency factor (deterministic tests);
+                                defaults to the query time.
 
         Phase B1: the whole build runs under ``world.lock`` — one
         consistent snapshot (see the class docstring for why holding
@@ -801,6 +1044,9 @@ class PassiveOracle:
                 include_policies=include_policies,
                 include_observations=include_observations,
                 max_observations=max_observations,
+                rank_by_salience=rank_by_salience,
+                salience_focus_entity_id=salience_focus_entity_id,
+                salience_now=salience_now,
             )
 
     def _build_context_packet_impl(
@@ -811,6 +1057,9 @@ class PassiveOracle:
         include_policies: bool = True,
         include_observations: bool = True,
         max_observations: int = 5,
+        rank_by_salience: bool = False,
+        salience_focus_entity_id: str | None = None,
+        salience_now: datetime | None = None,
     ) -> WorldContextPacket:
         """Body of build_context_packet; caller holds ``world.lock``."""
         # Focus entities
@@ -846,7 +1095,28 @@ class PassiveOracle:
             if include_policies:
                 policies = self._fetch_active_policies()
             if include_observations:
-                observations = self._fetch_recent_observations(max_observations)
+                if rank_by_salience:
+                    focus = salience_focus_entity_id
+                    if focus is None and focus_entity_ids:
+                        focus = focus_entity_ids[0]
+                    ranked = self.recall_by_salience(
+                        focus_entity_id=focus,
+                        limit=max_observations,
+                        now=salience_now,
+                    )
+                    observations = [
+                        ObservationSummary(
+                            record_id=r.record_id,
+                            title=r.title,
+                            summary=r.summary,
+                            observed_at=r.observed_at,
+                            speaker_id=r.speaker_id,
+                            participants=list(r.participants),
+                        )
+                        for r in ranked
+                    ]
+                else:
+                    observations = self._fetch_recent_observations(max_observations)
             open_contradiction_count = self._count_open_contradictions()
         except Exception as exc:  # noqa: BLE001 — resilience: degrade, don't raise
             logger.warning(
