@@ -128,6 +128,18 @@ export interface WyrdClientOptions {
   port?: number;
   /** Request timeout in milliseconds. Default: 10000 */
   timeoutMs?: number;
+  /**
+   * Bearer token for a WyrdHTTPServer with auth configured
+   * (Phase C2, `WYRD_API_TOKEN` server-side). Sent as
+   * `Authorization: Bearer <token>` on every request when set.
+   */
+  apiToken?: string;
+  /**
+   * API version prefix prepended to every endpoint path.
+   * Default: "/v1" (Phase C2). Set to "" to use the server's
+   * unversioned alias routes.
+   */
+  apiPrefix?: string;
 }
 
 // ---------------------------------------------------------------------------

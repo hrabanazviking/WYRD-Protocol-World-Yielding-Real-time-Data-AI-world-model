@@ -56,12 +56,31 @@ class WyrdPygameClient:
         timeout: int = 10,
         silent_on_error: bool = True,
         fallback_response: str = "The spirits whisper nothing of note.",
+        api_token: str | None = None,
+        api_prefix: str = "/v1",
     ) -> None:
+        # Phase C2: api_prefix defaults to the versioned "/v1" surface
+        # ("" selects the server's unversioned aliases); api_token —
+        # or WYRD_API_TOKEN from the environment — is sent as a
+        # Bearer header for servers with auth configured.
+        import os
         self.host = host
         self.port = port
         self.timeout = timeout
         self.silent_on_error = silent_on_error
         self.fallback_response = fallback_response
+        if api_token is None:
+            api_token = os.environ.get("WYRD_API_TOKEN", "")
+        self.api_token = api_token or ""
+        self.api_prefix = api_prefix
+
+    def _api_url(self, path: str) -> str:
+        return f"{self.base_url}{self.api_prefix}{path}"
+
+    def _auth_headers(self) -> dict:
+        if self.api_token:
+            return {"Authorization": f"Bearer {self.api_token}"}
+        return {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -154,9 +173,10 @@ class WyrdPygameClient:
             List of :class:`~wyrd_pygame_helpers.WyrdFact` objects,
             or ``[]`` on error when *silent_on_error* is ``True``.
         """
-        url = f"{self.base_url}/facts?subject_id={urllib.request.quote(subject_id)}"
+        url = f"{self._api_url('/facts')}?subject_id={urllib.request.quote(subject_id)}"
         try:
-            with urllib.request.urlopen(url, timeout=self.timeout) as resp:
+            req = urllib.request.Request(url, headers=self._auth_headers())
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
             return to_facts(raw)
         except Exception:
@@ -171,8 +191,9 @@ class WyrdPygameClient:
             ``True`` if the server responds with status 200, ``False`` otherwise.
         """
         try:
-            url = f"{self.base_url}/health"
-            with urllib.request.urlopen(url, timeout=self.timeout) as resp:
+            url = self._api_url("/health")
+            req = urllib.request.Request(url, headers=self._auth_headers())
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 return resp.status == 200
         except Exception:
             return False
@@ -183,12 +204,13 @@ class WyrdPygameClient:
 
     def _post(self, path: str, body: str) -> str:
         """Send a blocking HTTP POST and return the response body."""
-        url = f"{self.base_url}{path}"
+        url = self._api_url(path)
         data = body.encode("utf-8")
         req = urllib.request.Request(
             url,
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json",
+                     **self._auth_headers()},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:

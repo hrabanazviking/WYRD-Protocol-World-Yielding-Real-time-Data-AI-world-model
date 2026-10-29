@@ -23,11 +23,23 @@ signal event_pushed(event_type: String, ok: bool)
 @export var port: int = 8765
 ## Whether WyrdForge integration is active.
 @export var enabled: bool = true
+## Bearer token for a server with auth configured (Phase C2,
+## WYRD_API_TOKEN server-side). Empty = no auth header.
+@export var api_token: String = ""
+## API version prefix (Phase C2). Set to "" for the unversioned aliases.
+@export var api_prefix: String = "/v1"
 
 var _base_url: String
 
 func _ready() -> void:
-	_base_url = "http://%s:%d" % [host, port]
+	_base_url = "http://%s:%d%s" % [host, port, api_prefix]
+
+
+func _auth_headers(extra: PackedStringArray = PackedStringArray()) -> PackedStringArray:
+	var headers := extra.duplicate()
+	if api_token != "":
+		headers.append("Authorization: Bearer %s" % api_token)
+	return headers
 
 
 # -------------------------------------------------------------------------
@@ -132,7 +144,7 @@ static func normalize_persona_id(name: String) -> String:
 func _post(path: String, body_dict: Dictionary) -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)
-	var headers := PackedStringArray(["Content-Type: application/json"])
+	var headers := _auth_headers(PackedStringArray(["Content-Type: application/json"]))
 	var body_json := JSON.stringify(body_dict)
 	var err := http.request(
 		_base_url + path,
@@ -152,7 +164,7 @@ func _post(path: String, body_dict: Dictionary) -> Dictionary:
 func _get(path: String) -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)
-	var err := http.request(_base_url + path)
+	var err := http.request(_base_url + path, _auth_headers())
 	if err != OK:
 		http.queue_free()
 		return {"error": "HTTPRequest error %d" % err}

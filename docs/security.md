@@ -85,15 +85,19 @@ Every HTTP surface, in one place. Probed live by
 
 | Surface | Port | Default bind | Auth | Body handling |
 |---|---|---|---|---|
-| `WyrdHTTPServer` (`bridges/http_api.py`) | 8765 | `localhost` | none (loopback-only) | guarded `Content-Length` → 400; 1 MiB cap → 413 (Slice 3) |
+| `WyrdHTTPServer` (`bridges/http_api.py`) | 8765 | `localhost` | Bearer token when configured (Phase C2: `auth_token` arg or `WYRD_API_TOKEN` env; none configured = no auth, loudly logged, loopback-only local-dev mode) + rolling-window rate limit (default 600/min per client key, `0` disables) | guarded `Content-Length` → 400; 1 MiB cap → 413 (Slice 3) |
 | voxta (`bridges/voxta_bridge.py`) | 8766 | `localhost` | none (loopback-only) | guarded `Content-Length` → 400; 1 MiB cap → 413 (Slice 4) |
 | kindroid (`bridges/kindroid_bridge.py`) | 8767 | `localhost` | none (loopback-only) | guarded `Content-Length` → 400; 1 MiB cap → 413 (Slice 4) |
 | cloud relay (`tools/wyrd_cloud_relay/relay.py`) | 9000 | `0.0.0.0` | Bearer token (optional — startup refuses unsafe postures without one; see D2) | FastAPI/uvicorn stack |
 
-The three local bridges are loopback-only with no authentication —
-the roadmap's own model ("Bearer tokens and localhost defaults are
-the model"), confirmed and documented here, not rebuilt. The probe
-asserts each default bind resolves to a loopback address only: **0
+The three local bridges are loopback-only by default. Since Phase
+C2, `WyrdHTTPServer` itself carries the relay's model in core:
+versioned `/v1/` routes (the unversioned paths remain as aliases),
+optional bearer-token auth (`WYRD_API_TOKEN` — required on every
+endpoint when configured, absent = unauthenticated local-dev mode,
+logged loudly), and a rolling-window rate limit. The kindroid/voxta
+surfaces remain unauthenticated loopback-only. The probe asserts
+each default bind resolves to a loopback address only: **0
 unauthenticated write endpoints reachable from off-loopback.**
 
 All three share one body cap — `MAX_BODY_BYTES` = 1 MiB, enforced by

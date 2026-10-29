@@ -67,7 +67,14 @@ internal sealed class FakeWyrdServer : IDisposable
                 using (var sr = new System.IO.StreamReader(req.InputStream))
                     LastRequestBody = sr.ReadToEnd();
 
-            object responseObj = req.Url!.LocalPath switch
+            // Phase C2: the client defaults to the /v1/ prefix; the
+            // fake server strips it, mirroring the real server's
+            // versioned routes + unversioned aliases.
+            var localPath = req.Url!.LocalPath.StartsWith("/v1/")
+                ? req.Url.LocalPath[3..]
+                : req.Url.LocalPath;
+
+            object responseObj = localPath switch
             {
                 "/health" => HealthBody,
                 "/query" => QueryBody,
@@ -77,7 +84,7 @@ internal sealed class FakeWyrdServer : IDisposable
                 _ => new { error = "Not found" },
             };
 
-            int statusCode = req.Url.LocalPath switch
+            int statusCode = localPath switch
             {
                 "/health" => (int)HealthStatus,
                 _ => 200,

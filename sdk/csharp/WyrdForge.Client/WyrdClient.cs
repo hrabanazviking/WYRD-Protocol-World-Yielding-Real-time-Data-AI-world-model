@@ -25,6 +25,21 @@ public record WyrdClientOptions
 
     /// <summary>HTTP request timeout. Default: 10 seconds</summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Bearer token for a WyrdHTTPServer with auth configured
+    /// (Phase C2, WYRD_API_TOKEN server-side). Sent as an
+    /// Authorization: Bearer header on every request when set.
+    /// Default: null (no auth header).
+    /// </summary>
+    public string? ApiToken { get; init; }
+
+    /// <summary>
+    /// API version prefix prepended to every endpoint path.
+    /// Default: "/v1" (Phase C2). Set to "" to use the server's
+    /// unversioned alias routes.
+    /// </summary>
+    public string ApiPrefix { get; init; } = "/v1";
 }
 
 /// <summary>
@@ -62,15 +77,21 @@ public sealed class WyrdClient : IDisposable
 
     /// <summary>Create a WyrdClient with explicit host and port.</summary>
     public WyrdClient(string host = "localhost", int port = 8765,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null, string? apiToken = null,
+        string apiPrefix = "/v1")
     {
-        _baseUrl = $"http://{host}:{port}";
+        _baseUrl = $"http://{host}:{port}{apiPrefix}";
         _http = new HttpClient { Timeout = timeout ?? TimeSpan.FromSeconds(10) };
+        if (apiToken is not null)
+            _http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue(
+                    "Bearer", apiToken);
     }
 
     /// <summary>Create a WyrdClient from a <see cref="WyrdClientOptions"/> record.</summary>
     public WyrdClient(WyrdClientOptions options)
-        : this(options.Host, options.Port, options.Timeout) { }
+        : this(options.Host, options.Port, options.Timeout,
+               options.ApiToken, options.ApiPrefix) { }
 
     // -------------------------------------------------------------------------
     // Public API

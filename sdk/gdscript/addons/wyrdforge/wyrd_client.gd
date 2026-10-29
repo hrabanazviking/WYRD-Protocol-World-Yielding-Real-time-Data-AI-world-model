@@ -11,9 +11,21 @@ extends Node
 ##   client.queue_free()
 
 var _base_url: String
+var _api_token: String
 
-func _init(base_url: String = "http://localhost:8765") -> void:
+## base_url defaults to the Phase C2 versioned surface ("/v1");
+## pass a bare host:port URL to use the server's unversioned aliases.
+## api_token is sent as "Authorization: Bearer <token>" when non-empty.
+func _init(base_url: String = "http://localhost:8765/v1", api_token: String = "") -> void:
 	_base_url = base_url
+	_api_token = api_token
+
+
+func _headers(extra: PackedStringArray = PackedStringArray()) -> PackedStringArray:
+	var headers := extra.duplicate()
+	if _api_token != "":
+		headers.append("Authorization: Bearer %s" % _api_token)
+	return headers
 
 
 func query(persona_id: String, user_input: String = "") -> Dictionary:
@@ -35,7 +47,7 @@ func health() -> Dictionary:
 func _post(path: String, body_dict: Dictionary) -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)
-	var headers := PackedStringArray(["Content-Type: application/json"])
+	var headers := _headers(PackedStringArray(["Content-Type: application/json"]))
 	var err := http.request(
 		_base_url + path,
 		headers,
@@ -53,7 +65,7 @@ func _post(path: String, body_dict: Dictionary) -> Dictionary:
 func _get(path: String) -> Dictionary:
 	var http := HTTPRequest.new()
 	add_child(http)
-	var err := http.request(_base_url + path)
+	var err := http.request(_base_url + path, _headers())
 	if err != OK:
 		http.queue_free()
 		return {"error": "HTTPRequest error %d" % err}

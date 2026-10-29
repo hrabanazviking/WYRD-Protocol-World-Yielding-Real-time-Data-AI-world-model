@@ -29,6 +29,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 export class WyrdClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly apiToken?: string;
 
   /**
    * Create a WyrdClient.
@@ -38,8 +39,16 @@ export class WyrdClient {
   constructor(options: WyrdClientOptions = {}) {
     const host = options.host ?? DEFAULT_HOST;
     const port = options.port ?? DEFAULT_PORT;
-    this.baseUrl = `http://${host}:${port}`;
+    const prefix = options.apiPrefix ?? "/v1";
+    this.baseUrl = `http://${host}:${port}${prefix}`;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.apiToken = options.apiToken;
+  }
+
+  private _authHeaders(): Record<string, string> {
+    return this.apiToken
+      ? { Authorization: `Bearer ${this.apiToken}` }
+      : {};
   }
 
   // --------------------------------------------------------------------------
@@ -142,7 +151,10 @@ export class WyrdClient {
     const url = `${this.baseUrl}${path}`;
     let response: Response;
     try {
-      response = await fetch(url, { signal: AbortSignal.timeout(this.timeoutMs) });
+      response = await fetch(url, {
+        headers: this._authHeaders(),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
     } catch (err) {
       throw new WyrdConnectionError(
         `WYRD server unreachable at ${url}`,
@@ -158,7 +170,7 @@ export class WyrdClient {
     try {
       response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...this._authHeaders() },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(this.timeoutMs),
       });

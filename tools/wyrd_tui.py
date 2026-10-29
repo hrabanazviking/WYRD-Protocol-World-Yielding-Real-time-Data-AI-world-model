@@ -123,17 +123,41 @@ class TuiState:
 # ---------------------------------------------------------------------------
 
 class WyrdRelayClient:
-    """Thin stdlib HTTP client for WyrdHTTPServer."""
+    """Thin stdlib HTTP client for WyrdHTTPServer.
+
+    Phase C2: requests go to the versioned ``/v1`` surface by
+    default (``api_prefix=""`` selects the server's unversioned
+    alias routes).  ``api_token`` — or the ``WYRD_API_TOKEN``
+    environment variable when no token is passed — is sent as a
+    Bearer header for servers with auth configured.
+    """
 
     def __init__(self, host: str = "localhost", port: int = 8765,
-                 timeout: int = 5):
+                 timeout: int = 5, api_token: str | None = None,
+                 api_prefix: str = "/v1"):
+        import os
         self.base_url = f"http://{host}:{port}"
+        self.api_prefix = api_prefix
         self.timeout  = timeout
+        if api_token is None:
+            api_token = os.environ.get("WYRD_API_TOKEN", "")
+        self.api_token = api_token or ""
+
+    def _url(self, path: str) -> str:
+        return self.base_url + self.api_prefix + path
+
+    def _headers(self) -> dict:
+        if self.api_token:
+            return {"Authorization": f"Bearer {self.api_token}"}
+        return {}
 
     def _get(self, path: str) -> dict | None:
         try:
+            req = urllib.request.Request(
+                self._url(path), headers=self._headers(), method="GET",
+            )
             with urllib.request.urlopen(
-                self.base_url + path, timeout=self.timeout
+                req, timeout=self.timeout
             ) as resp:
                 return json.loads(resp.read().decode())
         except Exception:
@@ -143,9 +167,10 @@ class WyrdRelayClient:
         try:
             data = json.dumps(body).encode()
             req  = urllib.request.Request(
-                self.base_url + path,
+                self._url(path),
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json",
+                         **self._headers()},
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
