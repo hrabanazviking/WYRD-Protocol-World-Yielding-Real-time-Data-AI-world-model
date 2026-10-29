@@ -26,6 +26,14 @@ Phase B3 (spatial core) adds metric-geometry queries over
     14. nearest_to_point    — same, around a raw point
     15. distance_between    — metres between two entities (or None)
 
+Phase D1 (combat awareness) adds fight queries over the combat
+components in ``ecs/components/combat.py``:
+    16. get_engagement      — the live engagement an entity is in
+    17. threats_to          — per-observer threat assessments of an entity
+    18. threats_perceived_by — one observer's own threat assessments
+    19. combatants_within   — combatants within R, with derived range bands
+    20. range_band_between  — the derived range band between two entities
+
 The containment model (queries 1/2/6/7, hierarchy membership) is
 unchanged: ``get_nearby`` still means "shares my location node",
 never "is geometrically close". The two models compose — an entity
@@ -37,7 +45,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+import wyrdforge.ecs.components.combat  # noqa: F401  (component registration)
 from wyrdforge.ecs.components.character import FactionComponent
+from wyrdforge.ecs.components.combat import (
+    CombatantComponent,
+    EngagementComponent,
+    ThreatComponent,
+    range_band,
+)
 from wyrdforge.ecs.components.identity import (
     DescriptionComponent,
     NameComponent,
@@ -60,6 +75,8 @@ from wyrdforge.models.memory import (
     PolicyRecord,
 )
 from wyrdforge.oracle.models import (
+    CombatProximityResult,
+    EngagementResult,
     EntitySummary,
     FactSummary,
     LocationResult,
@@ -68,6 +85,7 @@ from wyrdforge.oracle.models import (
     PositionResult,
     ProximityResult,
     RelationResult,
+    ThreatResult,
     WorldContextPacket,
 )
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
@@ -422,6 +440,151 @@ class PassiveOracle:
             if not isinstance(a, PositionComponent) or not isinstance(b, PositionComponent):
                 return None
             return a.distance_to(b)
+
+    # ------------------------------------------------------------------
+    # Queries 16–20: combat awareness (Phase D1)
+    #
+    # All run under world.lock (B1 discipline). Engagements are
+    # entities carrying EngagementComponent; threat answers are
+    # PERCEIVED state read from each observer's ThreatComponent —
+    # the Oracle reports what observers believe, never a merged
+    # "true" threat. Range bands are derived from B3 distances at
+    # query time via ecs.components.combat.range_band.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _engagement_result(comp: EngagementComponent) -> EngagementResult:
+        return EngagementResult(
+            engagement_id=comp.entity_id,
+            state=comp.state,
+            participant_ids=list(comp.participant_ids),
+            anchor_entity_id=comp.anchor_entity_id,
+            label=comp.label,
+            started_at=comp.started_at,
+            ended_at=comp.ended_at,
+        )
+
+    def get_engagement(self, entity_id: str) -> EngagementResult | None:
+        """The live engagement an entity participates in, or None.
+
+        When ``entity_id`` IS an engagement entity, that engagement
+        is returned (live or ended — the caller asked about it by
+        name). Otherwise the entity's live (non-ended) engagements
+        are considered; when several are live, the first by
+        engagement_id wins, so the answer is deterministic. An
+        entity in no live engagement gets None.
+        """
+        with self._world.lock:
+            own = self._world.get_component(entity_id, "engagement")
+            if isinstance(own, EngagementComponent):
+                return self._engagement_result(own)
+            live: list[EngagementComponent] = []
+            for _entity, comp in self._world.iter_components("engagement"):
+                if isinstance(comp, EngagementComponent) and comp.is_live and comp.has_participant(entity_id):
+                    live.append(comp)
+            if not live:
+                return None
+            live.sort(key=lambda c: c.entity_id)
+            return self._engagement_result(live[0])
+
+    def threats_to(self, entity_id: str) -> list[ThreatResult]:
+        """Every observer's threat assessment OF an entity.
+
+        One result per observer who has assessed the target — the
+        list IS the divergence surface: differing levels for the
+        same target are reported side by side, never averaged.
+        Sorted by ``(-level, observer_id)`` for determinism.
+        """
+        with self._world.lock:
+            results: list[ThreatResult] = []
+            for entity, comp in self._world.iter_components("threats"):
+                if not isinstance(comp, ThreatComponent):
+                    continue
+                assessment = comp.get_assessment(entity_id)
+                if assessment is None:
+                    continue
+                results.append(ThreatResult(
+                    observer_id=entity.entity_id,
+                    target_id=entity_id,
+                    level=assessment.level,
+                    basis_event_ids=list(assessment.basis_event_ids),
+                    source=assessment.source,
+                    confidence=assessment.confidence,
+                    assessed_at=assessment.assessed_at,
+                ))
+            results.sort(key=lambda r: (-r.level, r.observer_id))
+            return results
+
+    def threats_perceived_by(self, observer_id: str) -> list[ThreatResult]:
+        """One observer's own threat assessments, most feared first."""
+        with self._world.lock:
+            comp = self._world.get_component(observer_id, "threats")
+            if not isinstance(comp, ThreatComponent):
+                return []
+            return [
+                ThreatResult(
+                    observer_id=observer_id,
+                    target_id=a.target_id,
+                    level=a.level,
+                    basis_event_ids=list(a.basis_event_ids),
+                    source=a.source,
+                    confidence=a.confidence,
+                    assessed_at=a.assessed_at,
+                )
+                for a in comp.targets_above(0.0)
+            ]
+
+    def combatants_within(
+        self, entity_id: str, radius: float
+    ) -> list[CombatProximityResult]:
+        """Combatants within ``radius`` metres of an entity (B3-derived).
+
+        Only active entities carrying a CombatantComponent are
+        returned; the centre is excluded. Each result's
+        ``range_band`` is derived from its B3 distance at query
+        time. An entity with no position has no combat
+        neighbourhood: the result is empty. Negative radius raises
+        ValueError (the B3 contract).
+        """
+        if radius < 0:
+            raise ValueError(f"radius must be non-negative, got {radius}")
+        with self._world.lock:
+            centre = self._world.get_component(entity_id, "position")
+            if not isinstance(centre, PositionComponent):
+                return []
+            index = self._spatial_index()
+            found = index.within_radius(
+                centre.x, centre.y, centre.z, radius, frame_id=centre.frame_id
+            )
+            results: list[CombatProximityResult] = []
+            for eid, dist in found:
+                if eid == entity_id:
+                    continue
+                if not isinstance(self._world.get_component(eid, "combatant"), CombatantComponent):
+                    continue
+                point = index.point_of(eid)
+                assert point is not None
+                band = range_band(dist)
+                assert band is not None
+                results.append(CombatProximityResult(
+                    entity_id=eid, distance=dist, range_band=band,
+                    x=point[0], y=point[1], z=point[2], frame_id=point[3],
+                ))
+            return results
+
+    def range_band_between(self, entity_id_a: str, entity_id_b: str) -> str | None:
+        """The derived range band between two entities, or None.
+
+        None exactly when the B3 distance is None (either entity
+        unpositioned, or cross-frame) — an undefined distance has
+        no band.
+        """
+        with self._world.lock:
+            a = self._world.get_component(entity_id_a, "position")
+            b = self._world.get_component(entity_id_b, "position")
+            if not isinstance(a, PositionComponent) or not isinstance(b, PositionComponent):
+                return None
+            return range_band(a.distance_to(b))
 
     # ------------------------------------------------------------------
     # Query 8: search_facts

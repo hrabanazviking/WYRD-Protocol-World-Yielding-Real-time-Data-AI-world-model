@@ -55,6 +55,56 @@ class ProximityResult(StrictModel):
     frame_id: str | None
 
 
+class EngagementResult(StrictModel):
+    """One engagement as the Oracle reports it (Phase D1).
+
+    The engagement is an entity; this is its summary. ``state`` is
+    the lifecycle state (skirmish / engaged / broken / ended).
+    """
+
+    engagement_id: str
+    state: str
+    participant_ids: list[str]
+    anchor_entity_id: str | None
+    label: str
+    started_at: datetime
+    ended_at: datetime | None
+
+
+class ThreatResult(StrictModel):
+    """One observer's perceived threat assessment (Phase D1).
+
+    Perceived state, not ground truth: two observers of the same
+    target may return different levels — that divergence is the
+    point of the model (roadmap §6).
+    """
+
+    observer_id: str
+    target_id: str
+    level: float
+    basis_event_ids: list[str]
+    source: str
+    confidence: float
+    assessed_at: datetime
+
+
+class CombatProximityResult(StrictModel):
+    """A combatant found by a combat radius query (Phase D1).
+
+    ``range_band`` is DERIVED from the B3 distance at query time
+    (engaged / near / far) — it is computed here, never read from
+    stored state, so it cannot disagree with the positions.
+    """
+
+    entity_id: str
+    distance: float
+    range_band: str
+    x: float
+    y: float
+    z: float
+    frame_id: str | None
+
+
 class RelationResult(StrictModel):
     """Faction membership and co-presence of an entity."""
 
