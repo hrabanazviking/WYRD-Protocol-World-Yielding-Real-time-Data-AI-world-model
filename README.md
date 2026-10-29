@@ -70,6 +70,72 @@ Coming soon!
 
 ---
 
+## Architecture Overview — The System as Built (added 2026-10-29)
+
+*The placeholder above predates this addition and is kept as written. What follows is the architecture as it actually stands at version 1.5.0; the full treatment lives in `docs/guides/architecture.md`.*
+
+WYRD Protocol is built in layers. Each layer is independently useful and testable:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Your Game / AI Platform                   │
+│          (Unity, Unreal, Foundry VTT, SillyTavern, …)       │
+└────────────────────────┬────────────────────────────────────┘
+                         │  HTTP JSON  (or in-process Python)
+┌────────────────────────▼────────────────────────────────────┐
+│                   Bifrost Bridge Layer                       │
+│  SDK: wyrdforge-js · WyrdForge.Client · GDScript addon       │
+│  Engine bridges: Unity · Unreal · Godot · Roblox · …        │
+│  AI bridges:  SillyTavern · Voxta · Kindroid · Hermes · …   │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────────┐
+│                  WyrdHTTPServer  (:8765)                     │
+│   POST /query   POST /event   GET /world   GET /facts        │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────────┐
+│                    Passive Oracle                            │
+│  who_is_here · where_is · what_is · get_facts · …           │
+│  (read-only — never writes, never hallucinates)              │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+┌───────────────┬─────────▼──────────┬───────────────────────┐
+│  World (ECS)  │  Yggdrasil (Spatial) │  PersistentMemoryStore│
+│  Entities     │  Zone→Region→Loc    │  SQLite + FTS5        │
+│  Components   │  Path resolution    │  MemoryPromoter       │
+│  Systems      │  Presence tracking  │  ContradictionDetector│
+└───────────────┴────────────────────┴───────────────────────┘
+```
+
+**Core principles:**
+
+* **Passive Oracle Model** — The Oracle is **read-only**. It reports ground truth — it never decides, never writes, never calls the LLM. This makes it deterministic and testable.
+* **ECS Entity-Component System** — World state lives in typed components attached to entities. The LLM receives a `WorldContextPacket` — a structured snapshot, not a raw dump.
+* **Yggdrasil Spatial Hierarchy** — Every location has a parent. Every entity has a spatial component. The Oracle can resolve full path hierarchies: "Sigrid is in the Great Hall, which is in the Mead Quarter, which is in the Thornholt region, which is in the Midgard zone." Since Phase B it also carries a true spatial core — a `PositionComponent` with a grid-hash index behind additive Oracle radius / nearest / distance queries.
+* **Bifrost Bridge Abstraction** — All engine adapters implement the same `BifrostBridge` ABC — ensuring every integration handles the same contract (query, push event, sync entity, health check).
+* **wyrdforge Memory Layer** — Six Norse-named memory stores mirror human memory systems:
+    * **Hugin** — short-term working memory (episodic)
+    * **Munin** — long-term recall (consolidated facts)
+    * **Mimir** — canonical knowledge base (immutable world facts)
+    * **Wyrd** — fate/consequence tracking (narrative causality)
+    * **Orlog** — ancestral/historical record (deep past)
+    * **Seidr** — predictive/probabilistic layer (future inference)
+
+---
+
+## What's New — The Advancement Roadmap Through 1.5.0 (added 2026-10-29)
+
+On 2026-10-29 the WYRD advancement roadmap (Phases A–E, 26 items) was carried to completion on the `development` branch. Core public APIs stayed stable and additive throughout; every schema change arrived as a real, tested migration. Final state: **version 1.5.0**, full test suite **2,284 passed / 1 failed** — the single failure is the known B1 timing flake (a load-sensitive feed-replay budget test), never a regression on a quiet machine.
+
+* **Phase A — Integrity & honesty (1.1.0).** One connection factory for every store (WAL, `synchronous=FULL`, foreign keys on, a unified 5 s busy timeout); the first real schema migration (bond store v1→v2) plus package version discipline; turn-atomic writeback; load honesty — failed components are classified, reported via `load_with_report()`, and preserved in a quarantine table instead of being silently skipped (world store v1→v2); cross-store backup & restore with a manifest and integrity verification.
+* **Phase B — Concurrency, scale & spatial (1.2.0).** A thread-safe World under one locking discipline; incremental persistence (dirty-row tracking, batched savepoints); the spatial core (`PositionComponent`, query-time grid-hash index, Oracle radius/nearest/distance queries); a durable, opt-in append-only event journal with persisted dead letters and replay-to-snapshot reconstruction; and a wall-clock binding — `WorldClock` wall-sync mode with a stated drift policy beside the unchanged deterministic advance mode.
+* **Phase C — Trust surface (1.3.0).** Per-subject purge: one subject can be erased across world, memory, bond, and journal stores, each in a single transaction, with a tombstone record and tests proving absence — a half-purge never claims success. HTTP API authentication and `/v1/` versioning (bearer token, rate limiting, SDKs updated in step). Provenance enforcement and injection hardening: writeback refuses unattributed utterances, and hostile world text is framed as attributed data, never as orders. Circuit-breaker wiring in the TurnLoop, so connector failures degrade instead of aborting the turn.
+* **Phase D — New senses (1.4.0).** A combat awareness core (combatants, engagements, per-observer threat beliefs, effects riding temporal-anchor windows); sensation state — the Aurelia seam (`sense.*` ingestion with Phase C provenance, freshness-honest Oracle answers, felt-vs-reported separation); salience & filtered recall; metaphysics reconciliation (fate/thread semantics on the runic foundation, with Oracle thread queries); multi-world operations (`MultiWorldHost` — concurrent worlds in one process with zero-bleed isolation and a read-only cross-world query surface); and Verdandi seam hardening (versioned nerve-feed schema v1, an explicit translation table, loud quarantine of malformed entries, and a mirror-lag health metric).
+* **Phase E — Reach & tooling (1.5.0).** Honest integration tests and a machine-readable honesty manifest classifying every integration and SDK; SDK publishing fixes (the JS build, C# NuGet metadata, and the Python console scripts `wyrd-chat` / `wyrd-world` / `wyrd-backup`); host-truth engine adapters (real Unity MonoBehaviours with an .asmdef and editor inspector, an OpenSim region-module host, and CryEngine / O3DE cores whose remaining stubs are labelled as stubs in every surface); the world inspector — `wyrdforge.inspector` with state diff, entity timeline on the event journal, a contradiction viewer, and durable dead-letter archaeology (`wyrd-inspect` / `wyrd-inspect-tui`); repo hygiene and doc truth, including a supported structured logging config; and a widened CI that stays manual-only (`workflow_dispatch`), now covering the satellite and JS/C# SDK suites plus a docs check that pins every referenced module and command.
+
+---
+
 ![https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/5436b92d-1c4e-4ed4-9cf9-7ef8f36f4cd1.jpg](https://raw.githubusercontent.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model/refs/heads/main/5436b92d-1c4e-4ed4-9cf9-7ef8f36f4cd1.jpg)
 
 ---
