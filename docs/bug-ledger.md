@@ -10,12 +10,14 @@ standing law. Roadmaps: Track 2 (this file), Track 6 (the incident record).
 
 ---
 
-## Triage — updated 2026-09-26
+## Triage — updated 2026-10-29
 
 - **Bleeding:** none — quiet.
 - **Limping:** BUG-004 verification open (fix in place 2026-09-26; awaiting
   the first qualifying state change to prove a genuine reflection publishes.
   Silence is the default, so this may take days. Not a failure — a pending proof.)
+  BUG-005 re-checked 2026-10-29 (see its entry): quarantine stands, the
+  flakiness is unchanged in kind; next re-check 2026-11-28.
 - **Cosmetic backlog:** none.
 
 Rule: silence when the list is empty. The dated line is refreshed whenever
@@ -156,7 +158,16 @@ triage changes — never silently.
 - **Pinning test:** `tests/test_phase19_load.py` — the 6 tests carry
   `@pytest.mark.xfail(strict=False)` quarantine markers.
 - **Status:** quarantined (flaky concurrent-load timing, ConnectionResetError
-  vs stdlib test server; owner: forge; re-check 2026-10-26)
+  vs stdlib test server; owner: forge; re-check 2026-11-28)
+- **Re-check 2026-10-29** (WYRD advancement Phase A triage, per the
+  hygiene rule below): `pytest tests/test_phase19_load.py -rX` on this
+  VM — 2 passed, 5 xfailed, 1 xpassed. The five xfails are the same
+  quarantined set failing the same way (timing under thread bursts);
+  the one xpass (`TestConcurrentQuery::test_all_have_response_key`)
+  is a non-strict xfail that happened to pass this run, not a new
+  failure mode. Verdict: the flakiness persists unchanged in kind, no
+  xfail's reason has drifted — the quarantine stands, re-check
+  re-dated to 2026-11-28.
 - **Quarantine hygiene:** the markers are `strict=False`, so a *new*
   failure mode would surface only as xfail, not as a failure. Review
   with `pytest tests/test_phase19_load.py -rX` (or `-rxX`) on the

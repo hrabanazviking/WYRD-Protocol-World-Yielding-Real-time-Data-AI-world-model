@@ -198,11 +198,16 @@ def test_quarantine_parsing_edge_cases():
         _validate_quarantine_body(found[0])  # missing owner
 
     # Nested parens in the reason: block is whole, entry validates.
+    # The re-check date is computed, not hard-coded: a fixed "future"
+    # date is a time bomb (the original 2026-10-26 fixture began
+    # failing on 2026-10-27 when the validator's future-date rule
+    # correctly rejected it — WYRD advancement Phase A triage).
+    future = (TODAY + dt.timedelta(days=30)).isoformat()
     found = _quarantine_blocks(
         "## Entries\n- **Status:** quarantined "
-        "(flaky (timing) under load; owner: forge; re-check 2026-10-26)\n"
+        f"(flaky (timing) under load; owner: forge; re-check {future})\n"
     )
     assert len(found) == 1
     reason, owner, recheck = _validate_quarantine_body(found[0])
-    assert owner == "forge" and recheck == "2026-10-26"
+    assert owner == "forge" and recheck == future
     assert "timing" in reason

@@ -290,14 +290,33 @@ class TestBoundedThreadPool:
     def test_queue_full_drops_task(self):
         pool = BoundedThreadPool(max_workers=1, max_queue=1)
         barrier = threading.Barrier(2)
-        # Block the single worker
-        pool.submit(lambda: barrier.wait(timeout=3))
+        started = threading.Event()
+
+        def blocker():
+            # Signal *from inside the task*: only once the worker has
+            # picked the task up is the queue provably empty, which is
+            # the precondition the rest of this test relies on.
+            started.set()
+            barrier.wait(timeout=3)
+
+        # Block the single worker — and wait until it is actually
+        # running the blocker. Without this handshake the filler submit
+        # below races worker startup: if the worker has not yet picked
+        # the blocker up, the blocker itself fills the queue, the
+        # *filler* is the task that gets dropped, and the third submit
+        # is then accepted once the worker frees the queue — the test
+        # failed ~35% of runs that way (WYRD advancement Phase A triage,
+        # 2026-10-29: 71/200 failures, all with that exact signature;
+        # the synchronized scenario passed 200/200). The pool's drop
+        # semantics were never at fault.
+        pool.submit(blocker)
+        assert started.wait(timeout=3)
         # Fill the queue
-        pool.submit(lambda: None)
+        assert pool.submit(lambda: None) is True
         # This one should be dropped
         result = pool.submit(lambda: None)
         assert result is False
-        assert pool.tasks_dropped >= 1
+        assert pool.tasks_dropped == 1
         barrier.wait(timeout=3)
         pool.shutdown(wait=True)
 
