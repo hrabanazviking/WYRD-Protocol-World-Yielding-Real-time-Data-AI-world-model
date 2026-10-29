@@ -892,6 +892,150 @@ class WorldStore:
         return [dict(row) for row in rows]
 
     # ------------------------------------------------------------------
+    # Per-subject purge (Phase C1)
+    # ------------------------------------------------------------------
+
+    def purge_subject(self, subject_id: str) -> dict:
+        """Erase every entity that *is* *subject_id*, in every world.
+
+        An entity is the subject when its ``entity_id`` equals the
+        subject id, or it carries a ``PersonaRefComponent``
+        (component type ``persona_ref``) whose ``persona_id`` equals
+        the subject id. For each such entity, in ONE transaction:
+
+        - all of its rows in ``components`` are deleted;
+        - its row in ``entities`` is deleted;
+        - its rows in ``quarantined_components`` (Phase A4 payloads
+          preserved on refused loads) are DESTROYED — purge is the
+          one act that overrides the quarantine doctrine, on the
+          subject's own demand (see ``persistence/purge.py``).
+
+        One structural exception to the mention rule:
+        ``ContainerComponent.children`` is containment state, not a
+        mention — a purged entity's id is scrubbed from the
+        ``children`` list of every SURVIVING container in the same
+        world (the row's ``data_json`` is rewritten with the scrubbed
+        list; nothing else in the payload changes). Every other
+        component of every other entity is left byte-identical —
+        including free text that merely mentions the subject.
+
+        This instance's incremental-save baselines (Phase B2) are
+        dropped afterwards: the file changed behind them, so the
+        next save re-seeds its baseline from the database itself.
+
+        Returns ``{"entities": n, "components": n,
+        "quarantined_components": n,
+        "container_references_removed": n}`` — removals performed by
+        THIS call (a re-purge reports zeros).
+        """
+        entities_removed = 0
+        components_removed = 0
+        quarantined_removed = 0
+        references_removed = 0
+        with self._save_lock:
+            with self._connect() as conn:
+                # Identify the subject's entities, per world.
+                purged: dict[str, set[str]] = {}
+                for row in conn.execute(
+                    "SELECT world_id, entity_id FROM entities"
+                ).fetchall():
+                    if row["entity_id"] == subject_id:
+                        purged.setdefault(row["world_id"], set()).add(
+                            row["entity_id"]
+                        )
+                for row in conn.execute(
+                    "SELECT world_id, entity_id, data_json FROM components "
+                    "WHERE component_type='persona_ref'"
+                ).fetchall():
+                    try:
+                        data = json.loads(row["data_json"])
+                    except (ValueError, TypeError):
+                        continue  # cannot prove it names the subject
+                    if isinstance(data, dict) and data.get("persona_id") == subject_id:
+                        purged.setdefault(row["world_id"], set()).add(
+                            row["entity_id"]
+                        )
+                if purged:
+                    for world_id, entity_ids in purged.items():
+                        ids = sorted(entity_ids)
+                        placeholders = ",".join("?" * len(ids))
+                        components_removed += conn.execute(
+                            "SELECT COUNT(*) FROM components "
+                            f"WHERE world_id=? AND entity_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                            [world_id, *ids],
+                        ).fetchone()[0]
+                        quarantined_removed += conn.execute(
+                            "SELECT COUNT(*) FROM quarantined_components "
+                            f"WHERE world_id=? AND entity_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                            [world_id, *ids],
+                        ).fetchone()[0]
+                        conn.execute(
+                            "DELETE FROM components "
+                            f"WHERE world_id=? AND entity_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                            [world_id, *ids],
+                        )
+                        conn.execute(
+                            "DELETE FROM quarantined_components "
+                            f"WHERE world_id=? AND entity_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                            [world_id, *ids],
+                        )
+                        cursor = conn.execute(
+                            "DELETE FROM entities "
+                            f"WHERE world_id=? AND entity_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                            [world_id, *ids],
+                        )
+                        entities_removed += cursor.rowcount
+                    # Scrub containment state: surviving containers in
+                    # each affected world lose the purged ids.
+                    stamp = datetime.now(timezone.utc).isoformat()
+                    for world_id, entity_ids in purged.items():
+                        container_rows = conn.execute(
+                            "SELECT entity_id, data_json FROM components "
+                            "WHERE world_id=? AND component_type='container'",
+                            (world_id,),
+                        ).fetchall()
+                        for crow in container_rows:
+                            if crow["entity_id"] in entity_ids:
+                                continue  # purged itself; already deleted
+                            try:
+                                data = json.loads(crow["data_json"])
+                            except (ValueError, TypeError):
+                                continue
+                            if not isinstance(data, dict):
+                                continue
+                            children = data.get("children")
+                            if not isinstance(children, list):
+                                continue
+                            kept = [c for c in children if c not in entity_ids]
+                            removed_here = len(children) - len(kept)
+                            if not removed_here:
+                                continue
+                            data["children"] = kept
+                            if "updated_at" in data:
+                                data["updated_at"] = stamp
+                            conn.execute(
+                                "UPDATE components SET data_json=?, updated_at=? "
+                                "WHERE world_id=? AND entity_id=? "
+                                "AND component_type='container'",
+                                (
+                                    json.dumps(data),
+                                    stamp,
+                                    world_id,
+                                    crow["entity_id"],
+                                ),
+                            )
+                            references_removed += removed_here
+            # The file changed behind this instance's B2 baselines;
+            # drop them so the next save re-seeds from the database.
+            self._persisted.clear()
+        return {
+            "entities": entities_removed,
+            "components": components_removed,
+            "quarantined_components": quarantined_removed,
+            "container_references_removed": references_removed,
+        }
+
+    # ------------------------------------------------------------------
     # Utilities
     # ------------------------------------------------------------------
 

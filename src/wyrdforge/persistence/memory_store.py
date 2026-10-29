@@ -62,6 +62,61 @@ def _deserialize_record(data: dict) -> MemoryRecord:
     return cls.model_validate(data)
 
 
+def _names_subject_exact(node: object, subject_id: str) -> bool:
+    """True when *subject_id* occurs as an exact string value in *node*.
+
+    Recursive over dicts (keys and values) and lists/tuples. A longer
+    string merely *containing* the id (a free-text mention) does not
+    count — Phase C1 matches structured fields only.
+    """
+    if isinstance(node, str):
+        return node == subject_id
+    if isinstance(node, dict):
+        return any(
+            _names_subject_exact(key, subject_id)
+            or _names_subject_exact(value, subject_id)
+            for key, value in node.items()
+        )
+    if isinstance(node, (list, tuple)):
+        return any(_names_subject_exact(item, subject_id) for item in node)
+    return False
+
+
+def _record_is_subjects(data: dict, subject_id: str) -> bool:
+    """Phase C1 matching for one stored record's parsed ``data_json``.
+
+    Structured subject fields only — see
+    :meth:`PersistentMemoryStore.purge_subject`.
+    """
+    scope = data.get("entity_scope") or {}
+    if subject_id in (scope.get("primary_subjects") or []):
+        return True
+    if subject_id in (scope.get("secondary_subjects") or []):
+        return True
+    content = data.get("content") or {}
+    payload = content.get("structured_payload") or {}
+    if isinstance(payload, dict):
+        if subject_id in (payload.get("participants") or []):
+            return True
+        if payload.get("fact_subject_id") == subject_id:
+            return True
+    # ReplayPersistenceBridge-derived observations are derived copies
+    # whose summary IS a verbatim bus envelope: an envelope naming
+    # the subject as an exact structured value makes the copy the
+    # subject's too. Gated on the bridge's tag so an ordinary
+    # observation whose summary happens to be JSON is never caught.
+    retrieval = data.get("retrieval") or {}
+    if "replay-persistence" in (retrieval.get("lexical_terms") or []):
+        summary = content.get("summary") or ""
+        try:
+            envelope = json.loads(summary)
+        except (ValueError, TypeError):
+            envelope = None
+        if envelope is not None and _names_subject_exact(envelope, subject_id):
+            return True
+    return False
+
+
 class _ScoredCandidate(NamedTuple):
     """Scoring inputs for one search candidate — no deserialized record.
 
@@ -416,6 +471,58 @@ class PersistentMemoryStore:
             )
             conn.execute("DELETE FROM memory_fts WHERE record_id=?", (record_id,))
             return cursor.rowcount > 0
+
+    def purge_subject(self, subject_id: str) -> list[str]:
+        """Erase every record that is *subject_id*'s (Phase C1).
+
+        A record is the subject's when the subject appears in a
+        structured subject field — never on a free-text mention:
+
+        - ``entity_scope.primary_subjects`` / ``secondary_subjects``
+          contains the subject;
+        - an observation's ``participants`` contains the subject
+          (shared observations are deleted whole, not redacted — see
+          ``persistence/purge.py``);
+        - a canonical fact's ``fact_subject_id`` equals the subject;
+        - the record is a ``ReplayPersistenceBridge``-derived
+          observation (tagged ``replay-persistence`` in its retrieval
+          terms, carrying a verbatim bus envelope as its summary) and
+          that envelope names the subject as an exact structured
+          value.
+
+        All deletions (``memory_records`` + the FTS5 index) run in
+        ONE transaction on this thread's connection. A best-effort
+        incremental vacuum follows (freed pages may otherwise retain
+        bytes until vacuumed — the limit is documented in
+        ``persistence/purge.py``). Returns the removed record ids.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT record_id, data_json FROM memory_records"
+            ).fetchall()
+            removed: list[str] = []
+            for row in rows:
+                try:
+                    data = json.loads(row["data_json"])
+                except (ValueError, TypeError):
+                    continue  # unparseable: cannot prove it is the subject's
+                if _record_is_subjects(data, subject_id):
+                    removed.append(row["record_id"])
+            if removed:
+                conn.executemany(
+                    "DELETE FROM memory_records WHERE record_id=?",
+                    [(rid,) for rid in removed],
+                )
+                conn.executemany(
+                    "DELETE FROM memory_fts WHERE record_id=?",
+                    [(rid,) for rid in removed],
+                )
+        if removed:
+            try:
+                self.incremental_vacuum()
+            except Exception:
+                pass  # best-effort only; the rows are already gone
+        return removed
 
     # ------------------------------------------------------------------
     # Read operations

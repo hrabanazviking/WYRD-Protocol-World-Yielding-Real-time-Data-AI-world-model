@@ -28,7 +28,14 @@ Design (smallest sound mechanism, following house patterns)
 - **Append-only.** Entries are only ever INSERTed; there is no update
   or delete path for journal entries. (Dead letters are the one
   exception by design: draining them is their documented semantics,
-  exactly as on the bus — see below.) ``journal_seq`` is an
+  exactly as on the bus — see below.) Phase C1 adds exactly one
+  further, deliberate exception: :meth:`EventJournal.purge_subject`
+  deletes entries (and persisted dead letters) naming one subject,
+  on that subject's own erasure demand — an append-only log that
+  kept a purged subject's words would fail the purge's absence
+  guarantee in spirit. The journal therefore has exactly two
+  deletion paths: dead-letter drain and per-subject purge (see
+  ``persistence/purge.py``). ``journal_seq`` is an
   AUTOINCREMENT primary key: strictly monotonic in recorded order for
   the life of the file, never reused.
 - **Bus sequence.** Every entry also carries the envelope's own bus
@@ -220,6 +227,26 @@ def classify_kind(topic: str, payload: object = None) -> str:
     if "fact" in lowered:
         return KIND_FACT
     return KIND_EVENT
+
+
+def _names_subject_exact(node: object, subject_id: str) -> bool:
+    """True when *subject_id* is an exact string value in *node*.
+
+    Recursive over dicts (keys and values) and lists/tuples. A
+    longer string merely containing the id (a free-text mention)
+    does not count — Phase C1 matches structured fields only.
+    """
+    if isinstance(node, str):
+        return node == subject_id
+    if isinstance(node, dict):
+        return any(
+            _names_subject_exact(key, subject_id)
+            or _names_subject_exact(value, subject_id)
+            for key, value in node.items()
+        )
+    if isinstance(node, (list, tuple)):
+        return any(_names_subject_exact(item, subject_id) for item in node)
+    return False
 
 
 def _envelope_to_dict(envelope: object) -> dict:
@@ -536,6 +563,58 @@ class EventJournal:
         with self._connect() as conn:
             row = conn.execute("SELECT COUNT(*) FROM dead_letters").fetchone()
         return int(row[0])
+
+    # ------------------------------------------------------------------
+    # Per-subject purge (Phase C1) — the journal's second deletion path
+    # ------------------------------------------------------------------
+
+    def purge_subject(self, subject_id: str) -> dict:
+        """Delete journal traces naming *subject_id* (Phase C1).
+
+        An entry is deleted when its stored envelope names the
+        subject as an exact structured value (recursively over the
+        envelope dict — payload values, source, turn id; a longer
+        string merely *containing* the id is a free-text mention and
+        does NOT match). A persisted dead letter carries no envelope
+        — its only content field is the recorded failure ``message``
+        — so a dead letter is deleted when that message names the
+        subject (substring, the one place "names" can only mean the
+        message text; see ``persistence/purge.py``).
+
+        Both deletions run in ONE transaction under the journal's
+        own lock. Returns ``{"entries": n, "dead_letters": n}`` —
+        removals performed by THIS call.
+        """
+        with self._lock:
+            with self._connect() as conn:
+                entry_ids: list[int] = []
+                for row in conn.execute(
+                    "SELECT journal_seq, envelope_json FROM journal_entries"
+                ).fetchall():
+                    try:
+                        envelope = json.loads(row["envelope_json"])
+                    except (ValueError, TypeError):
+                        continue  # cannot prove it names the subject
+                    if _names_subject_exact(envelope, subject_id):
+                        entry_ids.append(int(row["journal_seq"]))
+                if entry_ids:
+                    conn.executemany(
+                        "DELETE FROM journal_entries WHERE journal_seq=?",
+                        [(seq,) for seq in entry_ids],
+                    )
+                letter_ids = [
+                    int(row["dead_letter_id"])
+                    for row in conn.execute(
+                        "SELECT dead_letter_id, message FROM dead_letters"
+                    ).fetchall()
+                    if subject_id in (row["message"] or "")
+                ]
+                if letter_ids:
+                    conn.executemany(
+                        "DELETE FROM dead_letters WHERE dead_letter_id=?",
+                        [(lid,) for lid in letter_ids],
+                    )
+        return {"entries": len(entry_ids), "dead_letters": len(letter_ids)}
 
     # ------------------------------------------------------------------
     # Reconstruction & replay (honest scope — see module docstring)

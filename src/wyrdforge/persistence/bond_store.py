@@ -352,6 +352,57 @@ class PersistentBondStore:
             ).fetchall()
         return [BondEdge.model_validate(json.loads(r["data_json"])) for r in rows]
 
+    def purge_subject(self, subject_id: str) -> dict:
+        """Erase every bond touching *subject_id* (Phase C1).
+
+        Every edge where the subject is ``entity_a`` or ``entity_b``
+        is deleted with its vows and hurts — the store's existing
+        one-transaction cascade (the FKs are DEFERRABLE INITIALLY
+        DEFERRED, so deleting the edge before its children inside
+        one transaction still commits cleanly, exactly as
+        :meth:`delete_edge` relies on). Edges between other entities
+        are untouched, even ones whose free text mentions the
+        subject. Returns ``{"edges": n, "vows": n, "hurts": n}``
+        with the counts removed by THIS call.
+        """
+        with self._connect() as conn:
+            bond_ids = [
+                row["bond_id"]
+                for row in conn.execute(
+                    "SELECT bond_id FROM bond_edges "
+                    "WHERE entity_a=? OR entity_b=?",
+                    (subject_id, subject_id),
+                ).fetchall()
+            ]
+            if not bond_ids:
+                return {"edges": 0, "vows": 0, "hurts": 0}
+            placeholders = ",".join("?" * len(bond_ids))
+            vows_removed = conn.execute(
+                f"SELECT COUNT(*) FROM vows WHERE bond_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                bond_ids,
+            ).fetchone()[0]
+            hurts_removed = conn.execute(
+                f"SELECT COUNT(*) FROM hurts WHERE bond_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                bond_ids,
+            ).fetchone()[0]
+            conn.execute(
+                f"DELETE FROM bond_edges WHERE bond_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                bond_ids,
+            )
+            conn.execute(
+                f"DELETE FROM vows WHERE bond_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                bond_ids,
+            )
+            conn.execute(
+                f"DELETE FROM hurts WHERE bond_id IN ({placeholders})",  # noqa: S608 - placeholders only
+                bond_ids,
+            )
+        return {
+            "edges": len(bond_ids),
+            "vows": int(vows_removed),
+            "hurts": int(hurts_removed),
+        }
+
     # ------------------------------------------------------------------
     # Vow
     # ------------------------------------------------------------------
