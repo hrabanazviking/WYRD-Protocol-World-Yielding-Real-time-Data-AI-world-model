@@ -11,6 +11,8 @@ from wyrdforge.oracle.models import (
     PositionResult,
     ProximityResult,
     RelationResult,
+    ReportedSensationResult,
+    SensationResult,
     ThreatResult,
     WorldContextPacket,
 )
@@ -27,6 +29,8 @@ __all__ = [
     "PositionResult",
     "ProximityResult",
     "RelationResult",
+    "ReportedSensationResult",
+    "SensationResult",
     "ThreatResult",
     "WorldContextPacket",
 ]

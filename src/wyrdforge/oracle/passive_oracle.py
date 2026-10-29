@@ -34,6 +34,18 @@ components in ``ecs/components/combat.py``:
     19. combatants_within   — combatants within R, with derived range bands
     20. range_band_between  — the derived range band between two entities
 
+Phase D2 (sensation state, the Aurelia seam) adds body-state queries
+over the components in ``ecs/components/sensation.py``:
+    21. get_sensation       — one FELT channel reading, with its age
+    22. get_sensations      — all FELT channel readings, with ages
+    23. get_reported_sensations — REPORTED claims, kept apart from felt
+
+Freshness honesty (D2's Oracle contract): every sensation answer
+carries the reading's age at query time and a fresh/stale status —
+a stale reading reads as STALE, never as current. Felt and reported
+sensations are separate queries over separate stores: a report
+(another's claim) is never served as a feeling.
+
 The containment model (queries 1/2/6/7, hierarchy membership) is
 unchanged: ``get_nearby`` still means "shares my location node",
 never "is geometrically close". The two models compose — an entity
@@ -46,6 +58,7 @@ import logging
 from datetime import datetime, timezone
 
 import wyrdforge.ecs.components.combat  # noqa: F401  (component registration)
+import wyrdforge.ecs.components.sensation  # noqa: F401  (component registration)
 from wyrdforge.ecs.components.character import FactionComponent
 from wyrdforge.ecs.components.combat import (
     CombatantComponent,
@@ -53,6 +66,14 @@ from wyrdforge.ecs.components.combat import (
     ThreatComponent,
     range_band,
 )
+from wyrdforge.ecs.components.sensation import (
+    DEFAULT_FRESHNESS_WINDOW_SECONDS,
+    BodyStateFactComponent,
+    SensationComponent,
+    SensationReading,
+    body_state_fact_id,
+)
+from wyrdforge.ecs.components.temporal import TemporalAnchorComponent
 from wyrdforge.ecs.components.identity import (
     DescriptionComponent,
     NameComponent,
@@ -85,6 +106,8 @@ from wyrdforge.oracle.models import (
     PositionResult,
     ProximityResult,
     RelationResult,
+    ReportedSensationResult,
+    SensationResult,
     ThreatResult,
     WorldContextPacket,
 )
@@ -585,6 +608,151 @@ class PassiveOracle:
             if not isinstance(a, PositionComponent) or not isinstance(b, PositionComponent):
                 return None
             return range_band(a.distance_to(b))
+
+    # ------------------------------------------------------------------
+    # Queries 21–23: sensation state (Phase D2, the Aurelia seam)
+    #
+    # All run under world.lock (B1 discipline). Freshness honesty is
+    # structural: every result carries the reading's age at query
+    # time and a fresh/stale status against the caller's window
+    # (default DEFAULT_FRESHNESS_WINDOW_SECONDS). Felt readings and
+    # reported claims live in separate component stores and are
+    # served by separate queries — never merged.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _query_now(now: datetime | None) -> datetime:
+        if now is None:
+            return datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            return now.replace(tzinfo=timezone.utc)
+        return now
+
+    def _sensation_result(
+        self,
+        entity_id: str,
+        reading: SensationReading,
+        now: datetime,
+        window: float,
+    ) -> SensationResult:
+        stale = reading.is_stale_at(now, window)
+        promoted_until: datetime | None = None
+        fact_id = body_state_fact_id(entity_id, reading.channel)
+        fact = self._world.get_component(fact_id, "body_state_fact")
+        anchor = self._world.get_component(fact_id, "temporal_anchor")
+        if (
+            isinstance(fact, BodyStateFactComponent)
+            and fact.since == reading.episode_started_at
+            and isinstance(anchor, TemporalAnchorComponent)
+        ):
+            promoted_until = anchor.valid_until
+        return SensationResult(
+            entity_id=entity_id,
+            channel=reading.channel,
+            intensity=reading.intensity,
+            scale=reading.scale,
+            source=reading.source,
+            source_status=reading.source_status,
+            updated_at=reading.updated_at,
+            age_seconds=reading.age_seconds_at(now),
+            is_stale=stale,
+            status="stale" if stale else "fresh",
+            episode_started_at=reading.episode_started_at,
+            promoted_until=promoted_until,
+        )
+
+    def get_sensation(
+        self,
+        entity_id: str,
+        channel: str,
+        *,
+        now: datetime | None = None,
+        stale_after_seconds: float = DEFAULT_FRESHNESS_WINDOW_SECONDS,
+    ) -> SensationResult | None:
+        """One FELT sensation reading, with its age — or None.
+
+        None when the entity carries no sensation component or no
+        reading on ``channel`` (an unembodied or unsensed entity has
+        no body state to report — that absence is the answer, never
+        an invented zero). A present-but-old reading is returned
+        with ``status="stale"`` and its true age.
+        """
+        if stale_after_seconds < 0:
+            raise ValueError("stale_after_seconds must be non-negative")
+        moment = self._query_now(now)
+        with self._world.lock:
+            comp = self._world.get_component(entity_id, "sensation")
+            if not isinstance(comp, SensationComponent):
+                return None
+            reading = comp.get_reading(channel)
+            if reading is None:
+                return None
+            return self._sensation_result(entity_id, reading, moment, stale_after_seconds)
+
+    def get_sensations(
+        self,
+        entity_id: str,
+        *,
+        now: datetime | None = None,
+        stale_after_seconds: float = DEFAULT_FRESHNESS_WINDOW_SECONDS,
+    ) -> list[SensationResult]:
+        """All FELT sensation readings of an entity, channel-sorted.
+
+        Reported claims are NOT included — see
+        :meth:`get_reported_sensations`. An entity with no sensation
+        component gets an empty list.
+        """
+        if stale_after_seconds < 0:
+            raise ValueError("stale_after_seconds must be non-negative")
+        moment = self._query_now(now)
+        with self._world.lock:
+            comp = self._world.get_component(entity_id, "sensation")
+            if not isinstance(comp, SensationComponent):
+                return []
+            return [
+                self._sensation_result(entity_id, reading, moment, stale_after_seconds)
+                for reading in sorted(comp.readings, key=lambda r: r.channel)
+            ]
+
+    def get_reported_sensations(
+        self,
+        entity_id: str,
+        *,
+        now: datetime | None = None,
+        stale_after_seconds: float = DEFAULT_FRESHNESS_WINDOW_SECONDS,
+    ) -> list[ReportedSensationResult]:
+        """REPORTED sensation claims about an entity — kept apart.
+
+        Each result names its reporter: these are claims by others
+        about this body, served on their own surface so they can
+        never be mistaken for the entity's felt state (the MTOM
+        felt/reported firewall). Sorted by (channel, reporter_id).
+        """
+        if stale_after_seconds < 0:
+            raise ValueError("stale_after_seconds must be non-negative")
+        moment = self._query_now(now)
+        with self._world.lock:
+            comp = self._world.get_component(entity_id, "sensation")
+            if not isinstance(comp, SensationComponent):
+                return []
+            results: list[ReportedSensationResult] = []
+            for reading in comp.reported_readings:
+                stale = reading.is_stale_at(moment, stale_after_seconds)
+                results.append(ReportedSensationResult(
+                    entity_id=entity_id,
+                    channel=reading.channel,
+                    intensity=reading.intensity,
+                    scale=reading.scale,
+                    reporter_id=reading.reporter_id,
+                    source=reading.source,
+                    source_status=reading.source_status,
+                    updated_at=reading.updated_at,
+                    age_seconds=reading.age_seconds_at(moment),
+                    is_stale=stale,
+                    status="stale" if stale else "fresh",
+                ))
+            results.sort(key=lambda r: (r.channel, r.reporter_id or ""))
+            return results
 
     # ------------------------------------------------------------------
     # Query 8: search_facts

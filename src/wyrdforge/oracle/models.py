@@ -105,6 +105,54 @@ class CombatProximityResult(StrictModel):
     frame_id: str | None
 
 
+class SensationResult(StrictModel):
+    """One FELT sensation reading as the Oracle reports it (Phase D2).
+
+    Freshness honesty is part of the shape: every answer carries
+    ``age_seconds`` (the reading's age at query time) and ``status``
+    — ``"fresh"`` or ``"stale"``. A stale reading is reported AS
+    stale, never dressed as current body truth. ``promoted_until``
+    is the expiry of the reading episode's promoted body-state fact
+    anchor when one exists for this episode, else None.
+    """
+
+    entity_id: str
+    channel: str
+    intensity: float
+    scale: str
+    source: str
+    source_status: str
+    updated_at: datetime
+    age_seconds: float
+    is_stale: bool
+    status: str  # "fresh" | "stale"
+    episode_started_at: datetime
+    promoted_until: datetime | None
+
+
+class ReportedSensationResult(StrictModel):
+    """One REPORTED sensation claim as the Oracle reports it (Phase D2).
+
+    A separate model from :class:`SensationResult` on purpose: a
+    report is another entity's claim about a body, not the body's
+    own felt state, and the two surfaces never merge (the MTOM
+    felt/reported firewall). Carries the same freshness honesty
+    (age + fresh/stale status) as felt answers.
+    """
+
+    entity_id: str
+    channel: str
+    intensity: float
+    scale: str
+    reporter_id: str | None
+    source: str
+    source_status: str
+    updated_at: datetime
+    age_seconds: float
+    is_stale: bool
+    status: str  # "fresh" | "stale"
+
+
 class RelationResult(StrictModel):
     """Faction membership and co-presence of an entity."""
 

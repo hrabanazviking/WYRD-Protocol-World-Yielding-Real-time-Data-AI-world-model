@@ -44,6 +44,12 @@ class ObservationKind(str, Enum):
     WORLD_EVENT = "world_event"
     CODE_EVENT = "code_event"
     EMOTION_SIGNAL = "emotion_signal"
+    # Phase D2 (sensation state): a sensation observation — a spike or
+    # transition on an embodied entity's body channels. Like an
+    # utterance it carries someone's experience, so the C3 attribution
+    # rule gates it the same way (see services/attribution.py): the
+    # speaker is the feeler (felt) or the reporter (reported).
+    SENSATION = "sensation"
 
 
 class ObservationPayload(StrictModel):

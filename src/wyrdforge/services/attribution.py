@@ -21,6 +21,13 @@ events, emotion signals) are system/engine records, not someone's
 words: they are always "attributed" for this rule and keep their
 existing write path untouched.
 
+Phase D2 extends the same rule to ``sensation``-kind observations
+(roadmap §7: sensation transitions arrive as observations, provenance
+mandatory): a sensation is someone's *experience* exactly as an
+utterance is someone's words, so an unattributed sensation observation
+is refused the same way — the "speaker" of a felt sensation is the
+embodied feeler; of a reported sensation, the reporter.
+
 Two gates enforce the rule:
 
 1. the writeback boundary (:class:`WritebackEngine`) refuses to build
@@ -56,17 +63,22 @@ def observation_speaker(record: ObservationRecord) -> str | None:
     return speaker
 
 
+# Kinds carrying someone's words or experience: gated by the rule.
+# (Utterances since C3; sensations since D2 — same doctrine.)
+_ATTRIBUTION_GATED_KINDS = (ObservationKind.UTTERANCE, ObservationKind.SENSATION)
+
+
 def is_attributed_observation(record: object) -> bool:
     """True when *record* satisfies the C3 attribution rule.
 
-    Only utterance-kind :class:`ObservationRecord`\\ s are subject to
-    the rule; every other record (and every non-observation) is
-    attributed by construction.
+    Only utterance- and sensation-kind :class:`ObservationRecord`\\ s
+    are subject to the rule; every other record (and every
+    non-observation) is attributed by construction.
     """
     if not isinstance(record, ObservationRecord):
         return True
     payload = record.content.structured_payload
-    if payload.observation_kind != ObservationKind.UTTERANCE:
+    if payload.observation_kind not in _ATTRIBUTION_GATED_KINDS:
         return True
     if observation_speaker(record) is not None:
         return True
@@ -75,8 +87,16 @@ def is_attributed_observation(record: object) -> bool:
 
 def require_attributed_observation(record: ObservationRecord) -> None:
     """Raise :class:`UnattributedUtteranceError` if *record* is an
-    unattributed utterance; return None otherwise."""
+    unattributed utterance or sensation; return None otherwise."""
     if not is_attributed_observation(record):
+        if record.content.structured_payload.observation_kind == ObservationKind.SENSATION:
+            raise UnattributedUtteranceError(
+                "refusing to write an unattributed sensation observation: "
+                "a sensation must carry a feeler or reporter (speaker_id) "
+                "or identified participants — unattributed sensations may "
+                "not enter memory (Phase C3 provenance enforcement, "
+                "extended to sensations by Phase D2)"
+            )
         raise UnattributedUtteranceError(
             "refusing to write an unattributed utterance observation: "
             "an utterance must carry a speaker (speaker_id) or "
