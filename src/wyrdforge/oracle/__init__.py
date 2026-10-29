@@ -6,6 +6,8 @@ from wyrdforge.oracle.models import (
     LocationResult,
     ObservationSummary,
     PolicySummary,
+    PositionResult,
+    ProximityResult,
     RelationResult,
     WorldContextPacket,
 )
@@ -17,6 +19,8 @@ __all__ = [
     "LocationResult",
     "ObservationSummary",
     "PolicySummary",
+    "PositionResult",
+    "ProximityResult",
     "RelationResult",
     "WorldContextPacket",
 ]

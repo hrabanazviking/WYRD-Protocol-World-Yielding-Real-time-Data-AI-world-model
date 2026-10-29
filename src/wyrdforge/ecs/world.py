@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Iterator
 
 from wyrdforge.ecs.component import Component
+from wyrdforge.ecs.components.spatial import PositionComponent
 from wyrdforge.ecs.entity import Entity, _new_id, _now
 
 if TYPE_CHECKING:
@@ -254,6 +255,69 @@ class World:
             {"entity_id": entity_id, "component_type": comp_type},
         )
         return entity
+
+    # ------------------------------------------------------------------
+    # Metric position (Phase B3 — spatial core)
+    # ------------------------------------------------------------------
+
+    def get_position(self, entity_id: str) -> PositionComponent | None:
+        """Return the entity's PositionComponent, or None if it has none."""
+        comp = self.get_component(entity_id, "position")
+        return comp if isinstance(comp, PositionComponent) else None
+
+    def set_position(
+        self,
+        entity_id: str,
+        x: float,
+        y: float,
+        z: float,
+        *,
+        frame_id: str | None = None,
+    ) -> PositionComponent:
+        """Set an entity's metric position — the World-mediated move API.
+
+        Creates the entity's ``PositionComponent`` on first use and
+        mutates it in place afterwards (under the world lock, so a
+        concurrent Oracle query sees the position either entirely
+        before or entirely after the move). ``frame_id=None`` leaves
+        an existing component's frame unchanged; on creation it means
+        the default frame. Direct field assignment on the returned
+        component is also safe for queries — the Oracle's spatial
+        index is rebuilt from live components at query time (see
+        ``ecs/spatial_index.py``) — but this method is the contract
+        callers should prefer: it is atomic and it ``touch()``es the
+        component, so the move is visible to persistence timestamps
+        as well as to the B2 fingerprint (which sees the changed
+        coordinates either way).
+        """
+        created = False
+        with self._lock:
+            self._require_entity(entity_id)
+            comp = self._components.get(entity_id, {}).get("position")
+            if isinstance(comp, PositionComponent):
+                comp.x = float(x)
+                comp.y = float(y)
+                comp.z = float(z)
+                if frame_id is not None:
+                    comp.frame_id = frame_id
+                comp.touch()
+                return comp
+            comp = PositionComponent(
+                entity_id=entity_id,
+                x=float(x),
+                y=float(y),
+                z=float(z),
+                frame_id=frame_id,
+            )
+            self._components[entity_id]["position"] = comp
+            self._comp_type_index["position"].add(entity_id)
+            created = True
+        if created:
+            self._emit(
+                "world.component_added",
+                {"entity_id": entity_id, "component_type": "position"},
+            )
+        return comp
 
     def get_component(self, entity_id: str, component_type: str) -> Component | None:
         with self._lock:

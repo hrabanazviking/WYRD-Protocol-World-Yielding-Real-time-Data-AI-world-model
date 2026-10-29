@@ -30,6 +30,31 @@ class EntitySummary(StrictModel):
     location_id: str | None          # most specific location ID
 
 
+class PositionResult(StrictModel):
+    """Metric position of an entity (Phase B3 — spatial core)."""
+
+    entity_id: str
+    x: float
+    y: float
+    z: float
+    frame_id: str | None          # coordinate frame; None = default frame
+
+
+class ProximityResult(StrictModel):
+    """One entity found by a radius/nearest query (Phase B3).
+
+    Results are returned sorted by ``(distance, entity_id)`` — the
+    entity_id tie-break makes the order total and deterministic.
+    """
+
+    entity_id: str
+    distance: float               # metres from the query centre
+    x: float
+    y: float
+    z: float
+    frame_id: str | None
+
+
 class RelationResult(StrictModel):
     """Faction membership and co-presence of an entity."""
 

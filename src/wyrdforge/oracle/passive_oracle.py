@@ -5,7 +5,7 @@ PersistentMemoryStore (canonical facts, policies, observations).  It is
 intentionally *read-only*: it never mutates world state, never writes
 memory records, and carries no personality — pure structured data.
 
-Nine query methods:
+Nine original query methods:
     1. where_is          — spatial location of an entity
     2. who_is_here       — entities at a location
     3. what_is           — full entity snapshot
@@ -15,6 +15,22 @@ Nine query methods:
     7. get_nearby        — entities sharing the same location
     8. search_facts      — FTS search across memory
     9. build_context_packet — LLM-ready WorldContextPacket
+
+Phase B3 (spatial core) adds metric-geometry queries over
+``PositionComponent`` coordinates, backed by the grid-hash index in
+``ecs/spatial_index.py``:
+    10. get_position        — an entity's coordinates
+    11. within_radius       — positioned entities within R of an entity
+    12. within_radius_of_point — same, around a raw point
+    13. nearest             — the N nearest positioned entities to an entity
+    14. nearest_to_point    — same, around a raw point
+    15. distance_between    — metres between two entities (or None)
+
+The containment model (queries 1/2/6/7, hierarchy membership) is
+unchanged: ``get_nearby`` still means "shares my location node",
+never "is geometrically close". The two models compose — an entity
+may have either, both, or neither — and neither answers for the
+other.
 """
 from __future__ import annotations
 
@@ -30,8 +46,10 @@ from wyrdforge.ecs.components.identity import (
 from wyrdforge.ecs.components.spatial import (
     HierarchyLevel,
     ParentComponent,
+    PositionComponent,
     SpatialComponent,
 )
+from wyrdforge.ecs.spatial_index import SpatialGridIndex
 from wyrdforge.ecs.world import World
 from wyrdforge.ecs.yggdrasil import YggdrasilTree
 from wyrdforge.models.common import ApprovalState, StoreName
@@ -47,6 +65,8 @@ from wyrdforge.oracle.models import (
     LocationResult,
     ObservationSummary,
     PolicySummary,
+    PositionResult,
+    ProximityResult,
     RelationResult,
     WorldContextPacket,
 )
@@ -250,6 +270,158 @@ class PassiveOracle:
                     and not ent.has_tag("spatial_node")
                 ]
             return [s for eid in [e.entity_id for e in entities] if (s := self._entity_summary(eid))]
+
+    # ------------------------------------------------------------------
+    # Queries 10–15: metric geometry (Phase B3 — spatial core)
+    #
+    # All six run under world.lock and build their grid-hash index
+    # from the live PositionComponents inside that hold (see
+    # ecs/spatial_index.py for why query-time construction is the
+    # consistency design). Only ACTIVE entities with a
+    # PositionComponent participate. Distances are metres, Euclidean,
+    # and only ever computed within one coordinate frame.
+    # ------------------------------------------------------------------
+
+    def _spatial_index(self) -> SpatialGridIndex:
+        """Build the grid index from live positions. Caller holds the lock."""
+        return SpatialGridIndex(
+            (entity.entity_id, comp)
+            for entity, comp in self._world.iter_components("position")
+            if isinstance(comp, PositionComponent)
+        )
+
+    @staticmethod
+    def _proximity_results(
+        index: SpatialGridIndex, found: list[tuple[str, float]]
+    ) -> list[ProximityResult]:
+        results: list[ProximityResult] = []
+        for eid, dist in found:
+            point = index.point_of(eid)
+            assert point is not None  # the index just returned this id
+            results.append(
+                ProximityResult(
+                    entity_id=eid, distance=dist,
+                    x=point[0], y=point[1], z=point[2], frame_id=point[3],
+                )
+            )
+        return results
+
+    def get_position(self, entity_id: str) -> PositionResult | None:
+        """Return an entity's metric coordinates, or None.
+
+        None when the entity is not in the world or carries no
+        PositionComponent — having a hierarchy placement
+        (``where_is``) does not imply having coordinates.
+        """
+        with self._world.lock:
+            if self._world.get_entity(entity_id) is None:
+                return None
+            comp = self._world.get_component(entity_id, "position")
+            if not isinstance(comp, PositionComponent):
+                return None
+            return PositionResult(
+                entity_id=entity_id, x=comp.x, y=comp.y, z=comp.z,
+                frame_id=comp.frame_id,
+            )
+
+    def within_radius_of_point(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        radius: float,
+        *,
+        frame_id: str | None = None,
+    ) -> list[ProximityResult]:
+        """Positioned entities within ``radius`` metres of a point.
+
+        Boundary inclusive; sorted by ``(distance, entity_id)``.
+        Only entities in ``frame_id``'s frame are considered.
+        """
+        with self._world.lock:
+            index = self._spatial_index()
+            found = index.within_radius(x, y, z, radius, frame_id=frame_id)
+            return self._proximity_results(index, found)
+
+    def within_radius(
+        self, entity_id: str, radius: float
+    ) -> list[ProximityResult]:
+        """Positioned entities within ``radius`` metres of an entity.
+
+        The centre entity itself is excluded. An entity with no
+        position has no radius neighbourhood: the result is empty.
+        """
+        with self._world.lock:
+            centre = self._world.get_component(entity_id, "position")
+            if not isinstance(centre, PositionComponent):
+                return []
+            index = self._spatial_index()
+            found = index.within_radius(
+                centre.x, centre.y, centre.z, radius, frame_id=centre.frame_id
+            )
+            return self._proximity_results(
+                index, [pair for pair in found if pair[0] != entity_id]
+            )
+
+    def nearest_to_point(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        count: int,
+        *,
+        frame_id: str | None = None,
+    ) -> list[ProximityResult]:
+        """The ``count`` nearest positioned entities to a point.
+
+        Sorted by ``(distance, entity_id)``; fewer than ``count``
+        results when the frame holds fewer positioned entities.
+        """
+        with self._world.lock:
+            index = self._spatial_index()
+            found = index.nearest(x, y, z, count, frame_id=frame_id)
+            return self._proximity_results(index, found)
+
+    def nearest(self, entity_id: str, count: int) -> list[ProximityResult]:
+        """The ``count`` nearest positioned entities to an entity.
+
+        The centre entity itself is excluded (it asks for *other*
+        entities, nearest first). An entity with no position gets an
+        empty result. Note the exclusion happens BEFORE the count is
+        taken: asking for the nearest 3 returns 3 others, not the
+        centre plus 2.
+        """
+        if count < 0:
+            raise ValueError(f"count must be non-negative, got {count}")
+        with self._world.lock:
+            centre = self._world.get_component(entity_id, "position")
+            if not isinstance(centre, PositionComponent):
+                return []
+            if count == 0:
+                return []
+            index = self._spatial_index()
+            # Fetch one extra: the centre itself is the nearest thing
+            # to its own position, then drop it.
+            found = index.nearest(
+                centre.x, centre.y, centre.z, count + 1,
+                frame_id=centre.frame_id,
+            )
+            others = [pair for pair in found if pair[0] != entity_id]
+            return self._proximity_results(index, others[:count])
+
+    def distance_between(self, entity_id_a: str, entity_id_b: str) -> float | None:
+        """Metres between two entities' positions, or None.
+
+        None when either entity lacks a position or the two live in
+        different coordinate frames — cross-frame distance is
+        undefined, never approximated.
+        """
+        with self._world.lock:
+            a = self._world.get_component(entity_id_a, "position")
+            b = self._world.get_component(entity_id_b, "position")
+            if not isinstance(a, PositionComponent) or not isinstance(b, PositionComponent):
+                return None
+            return a.distance_to(b)
 
     # ------------------------------------------------------------------
     # Query 8: search_facts
