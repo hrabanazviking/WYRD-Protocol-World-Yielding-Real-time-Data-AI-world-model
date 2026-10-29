@@ -1,6 +1,6 @@
 """Wyrdforge — World-Yielding Real-time Data AI world model substrate."""
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from .models.memory import MemoryRecord, ObservationRecord, CanonicalFactRecord
 from .models.bond import BondEdge, Vow, Hurt

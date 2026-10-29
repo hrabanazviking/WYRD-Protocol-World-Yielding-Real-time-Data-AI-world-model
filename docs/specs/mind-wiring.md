@@ -15,8 +15,15 @@ A world model without time is a photograph; with time it becomes a saga.
   true). Answers "what is true *now*" vs "what was true *then*".
 - Tense is computed against world-now on the three threads of wyrd:
   **urðr** (become/past), **verðandi** (becoming/present), **skuld** (shall-be/future).
-- `WorldClock` — deterministic world-time. Nothing inside the simulation reads
-  wall-clock. `advance()` moves forward; rewinding raises (query anchors instead).
+- `WorldClock` — world-time in two modes. Deterministic mode (the default):
+  nothing inside the simulation reads wall-clock; `advance()` moves forward;
+  rewinding raises (query anchors instead). Wall-sync mode (Phase B5, opt-in
+  via `enable_wall_sync()`): the clock anchors world-time to wall time —
+  `anchor_world + (wall_now − anchor_wall) × rate` — under the drift policy
+  stated on the class (monotonic clamp on backwards wall jumps, downtime
+  counts across a restart, `advance()` raises rather than double-counting,
+  pull-based `sync()`/`current_time()` with an injectable wall source).
+  `CognitionSystem` syncs a wall-mode clock instead of advancing it.
 
 ### 2. Theory of Mind — `ecs/components/theory_of_mind.py`
 

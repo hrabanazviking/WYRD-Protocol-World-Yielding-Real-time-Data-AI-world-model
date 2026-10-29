@@ -1,8 +1,10 @@
 """CognitionSystem — the tick-level weaving of the four mind modules.
 
 On every tick this system:
-1. **Advances world-time** (temporal.py): the deterministic WorldClock
-   moves forward by ``delta_t``. Wyrd never rewinds.
+1. **Advances world-time** (temporal.py): a deterministic WorldClock
+   moves forward by ``delta_t``; a wall-synced WorldClock (Phase B5)
+   is synced to wall time instead — ``delta_t`` does not apply to it,
+   and wall elapsed time is never double-counted. Wyrd never rewinds.
 2. **Watches the threads of wyrd**: temporal anchors whose validity ends
    are reported as newly-urðr (become past). Nothing is deleted — the
    past stays queryable.
@@ -57,7 +59,13 @@ class CognitionSystem(System):
         self.potential_entities: set[str] = set()
 
     def tick(self, world: World, delta_t: float = 1.0) -> None:
-        now = self.clock.advance(delta_t)
+        # Wall-synced clocks are driven by the wall, not by delta_t:
+        # sync (pull) instead of advance, so elapsed wall time is
+        # counted exactly once (Phase B5).
+        if self.clock.is_wall_synced:
+            now = self.clock.sync()
+        else:
+            now = self.clock.advance(delta_t)
         newly_urdhr: list[str] = []
         speculation_warnings: list[str] = []
         manifest = 0
