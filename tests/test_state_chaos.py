@@ -15,9 +15,18 @@ import pytest
 
 from wyrdforge.bridges import verdandi_bridge as vb
 from wyrdforge.hardening import state_io
+from wyrdforge.persistence import bond_store, memory_store, world_store
 from wyrdforge.persistence.bond_store import PersistentBondStore
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
 from wyrdforge.persistence.world_store import WorldStore
+
+#: Each store's current schema version. Bond moved to v2 in Phase A2
+#: (first real migration); world/memory remain at v1.
+_EXPECTED_VERSION = {
+    "world": world_store.CURRENT_SCHEMA_VERSION,
+    "memory": memory_store.CURRENT_SCHEMA_VERSION,
+    "bond": bond_store.CURRENT_SCHEMA_VERSION,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -103,8 +112,11 @@ def test_store_newer_schema_quarantines_with_version_named(
 
 @pytest.mark.parametrize("name,cls,probe", _STORES,
                          ids=[n for n, _, _ in _STORES])
-def test_store_unstamped_db_migrates_to_v1(tmp_path, name, cls, probe):
-    # A DB created before versioning existed reads as v0 and is stamped.
+def test_store_unstamped_db_migrates_to_current(tmp_path, name, cls, probe):
+    # A DB created before versioning existed reads as v0 and is stamped
+    # at the store's current version. (Was "..._migrates_to_v1" with a
+    # hard-coded 1 for all stores until Phase A2 moved bond to v2 —
+    # that hard code was a true pin on the old version, updated here.)
     path = tmp_path / f"{name}.db"
     conn = sqlite3.connect(str(path))
     conn.execute("CREATE TABLE legacy (id INTEGER)")
@@ -114,7 +126,10 @@ def test_store_unstamped_db_migrates_to_v1(tmp_path, name, cls, probe):
     assert probe(store) in ([], 0)
     check = sqlite3.connect(str(path))
     try:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert (
+            check.execute("PRAGMA user_version").fetchone()[0]
+            == _EXPECTED_VERSION[name]
+        )
     finally:
         check.close()
 

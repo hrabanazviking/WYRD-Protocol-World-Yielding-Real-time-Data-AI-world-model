@@ -4,7 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wyrdforge"
-version = "1.0.0"
+# Version discipline (Phase A2, 2026-10-29): the package version tracks
+# the WYRD advancement phases — 1.0.0 was the frozen pre-campaign
+# version, 1.1.0 is Phase A. Bump the minor per completed phase (patch
+# for fixes within a phase); keep src/wyrdforge/__init__.__version__
+# in step. Store schema versions (PRAGMA user_version) are separate
+# and versioned per store.
+version = "1.1.0"
 description = "WYRD Protocol — World-Yielding Real-time Data AI World Model"
 readme = "README.md"
 license = { text = "CC BY 4.0" }

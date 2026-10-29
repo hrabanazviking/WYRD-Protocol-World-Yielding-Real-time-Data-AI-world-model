@@ -186,9 +186,10 @@ PRAGMA user_version=1;
 def test_pre_hardening_bond_db_still_opens(tmp_path: Path) -> None:
     """A v1 bond DB written before the pack has no FK declarations
     (CREATE TABLE IF NOT EXISTS does not retrofit them). It must keep
-    opening and serving its rows; retrofitting the constraints onto
-    existing files is the A2 migration's job, not a silent side
-    effect of opening the store."""
+    opening and serving its rows. Since Phase A2 that open runs the
+    real v1 -> v2 migration, which rebuilds vows/hurts with the FK
+    schema (see tests/test_bond_migration.py); this test pins that
+    the A1-era file still opens and serves either way."""
     db_path = tmp_path / "legacy_bonds.db"
     raw = sqlite3.connect(str(db_path))
     raw.executescript(_PRE_A1_BOND_SCHEMA)
