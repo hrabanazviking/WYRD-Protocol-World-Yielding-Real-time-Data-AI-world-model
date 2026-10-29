@@ -3,7 +3,7 @@
   "Name": "WyrdForge",
   "Version": "1.0.0",
   "VersionName": "1.0.0",
-  "Description": "WYRD Protocol bridge for CryEngine — grounds NPC dialogue and entity state in a deterministic ECS world model via WyrdHTTPServer.",
+  "Description": "WYRD Protocol bridge for CryEngine — PARTIAL STUB: the client logic is implemented and host-free tested, but no HTTP transport (libcurl) is bound and there is no CryEngine plugin registration, so it does not yet work in-engine. See TESTING.md.",
   "Author": "Volmarr Wyrd (RuneForgeAI)",
   "AuthorURL": "https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model",
   "Category": "AI"

@@ -1,62 +1,13 @@
 namespace WyrdForge.Unity
 {
     /// <summary>
-    /// WyrdNPC — MonoBehaviour component that registers this GameObject as a
-    /// WYRD entity on Start() and exposes dialogue query helpers.
+    /// WyrdNPC — plain-C# wrapper that registers an entity with WyrdManager.
     ///
-    /// ─── WIRE-UP GUIDE ───────────────────────────────────────────────────────
-    ///
-    /// 1. Attach WyrdNPC to any NPC GameObject.
-    /// 2. Fill in EntityData (EntityId, Name, SceneName, Role).
-    /// 3. Ensure a WyrdManager singleton exists in the scene.
-    /// 4. In a dialogue trigger:
-    ///
-    ///    void OnPlayerInteract(string playerInput)
-    ///    {
-    ///        StartCoroutine(npc.QueryCoroutine(playerInput, reply =>
-    ///        {
-    ///            dialogueBubble.text = reply;
-    ///        }));
-    ///    }
-    ///
-    /// ─── FULL MONOBEHAVIOUR IMPLEMENTATION ───────────────────────────────────
-    ///
-    ///   using UnityEngine;
-    ///   using UnityEngine.Networking;
-    ///   using System.Collections;
-    ///
-    ///   public class WyrdNPCBehaviour : MonoBehaviour
-    ///   {
-    ///       public WyrdEntityData EntityData;
-    ///
-    ///       void Start()
-    ///       {
-    ///           if (WyrdManager.Instance.Options.AutoRegisterNPCs)
-    ///               WyrdManager.Instance.RegisterEntity(EntityData);
-    ///       }
-    ///
-    ///       public IEnumerator QueryCoroutine(string input, System.Action&lt;string&gt; onComplete)
-    ///       {
-    ///           string personaId = WyrdEntityData.NormalizePersonaId(EntityData.Name);
-    ///           string body      = WyrdEntityData.BuildQueryBody(personaId, input);
-    ///
-    ///           var req = new UnityWebRequest(
-    ///               WyrdManager.Instance.Options.BaseUrl() + "/query", "POST");
-    ///           req.uploadHandler   = new UploadHandlerRaw(
-    ///               System.Text.Encoding.UTF8.GetBytes(body));
-    ///           req.downloadHandler = new DownloadHandlerBuffer();
-    ///           req.SetRequestHeader("Content-Type", "application/json");
-    ///
-    ///           yield return req.SendWebRequest();
-    ///
-    ///           if (req.result == UnityWebRequest.Result.Success)
-    ///               onComplete(WyrdEntityData.ParseResponse(req.downloadHandler.text));
-    ///           else
-    ///               onComplete(WyrdManager.Instance.Options.FallbackResponse);
-    ///       }
-    ///   }
-    ///
-    /// ─────────────────────────────────────────────────────────────────────────
+    /// This class is deliberately Unity-free so it can be unit-tested with
+    /// plain dotnet. The Unity host layer is WyrdNPCBehaviour (E3), a real
+    /// MonoBehaviour in this same Runtime folder: attach it to an NPC
+    /// GameObject, fill in its Inspector fields, and it builds one of these
+    /// and registers it on Start.
     /// </summary>
     public sealed class WyrdNPC
     {

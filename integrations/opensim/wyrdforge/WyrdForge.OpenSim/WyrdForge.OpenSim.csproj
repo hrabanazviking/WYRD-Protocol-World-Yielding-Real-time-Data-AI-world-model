@@ -5,10 +5,17 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!--
-      No OpenSim.Framework reference here. The pure logic (AvatarMapper,
-      ChatCommandParser, WyrdForgeRegionModule) is testable standalone.
-      When deploying to OpenSim, add your OpenSim.Framework.dll reference
-      and implement IRegionModuleBase on WyrdForgeRegionModule directly.
+      No OpenSim.Framework reference here, deliberately: this project is
+      the host-free bridge core (AvatarMapper, ChatCommandParser,
+      WyrdForgeRegionModule) and stays unit-testable standalone.
+
+      The OpenSim.Framework dependency lives exactly where a real
+      deployment needs it — in the sibling deployment project
+      WyrdForge.OpenSim.RegionModule, whose WyrdForgeRegionModuleHost
+      implements IRegionModuleBase (via INonSharedRegionModule) on top
+      of this core. See that project's README.md. (E3: before E3 this
+      comment told deployers to implement IRegionModuleBase themselves;
+      the implementation now ships.)
     -->
   </PropertyGroup>
 

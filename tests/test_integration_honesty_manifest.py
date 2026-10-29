@@ -121,3 +121,138 @@ def test_mirror_files_carry_their_label():
     for name, entry in m["integrations"].items():
         if entry["classification"] == "experimental-host-untested":
             assert entry["honest_harness"] is None, name
+
+
+# ---------------------------------------------------------------------------
+# E3 host-truth pins (roadmap §9 E3): the Unity host layer is real, the
+# OpenSim region module implements IRegionModuleBase in an isolated
+# deployment project, and CryEngine/O3De carry their STUB labels in every
+# surface that names them. These pins keep that truth from rotting back
+# into overstatement.
+# ---------------------------------------------------------------------------
+
+UNITY_PKG = REPO / "integrations" / "unity" / "wyrdforge"
+OPENSIM_PKG = REPO / "integrations" / "opensim" / "wyrdforge"
+CRY_PKG = REPO / "integrations" / "cryengine" / "wyrdforge"
+O3DE_PKG = REPO / "integrations" / "o3de" / "wyrdforge"
+
+
+def test_e3_unity_host_layer_is_real():
+    # Genuine MonoBehaviours wrapping the plain-C# client.
+    manager_behaviour = (
+        UNITY_PKG / "Runtime" / "WyrdManagerBehaviour.cs"
+    ).read_text(encoding="utf-8")
+    assert "class WyrdManagerBehaviour : MonoBehaviour" in manager_behaviour
+    assert "using UnityEngine;" in manager_behaviour
+    npc_behaviour = (
+        UNITY_PKG / "Runtime" / "WyrdNPCBehaviour.cs"
+    ).read_text(encoding="utf-8")
+    assert "class WyrdNPCBehaviour : MonoBehaviour" in npc_behaviour
+    # The xUnit suite's Compile-Includes still name files that exist.
+    tests_csproj = (
+        UNITY_PKG / "WyrdForge.Unity.Tests" / "WyrdForge.Unity.Tests.csproj"
+    ).read_text(encoding="utf-8")
+    for name in ("WyrdUnityOptions.cs", "WyrdEntityData.cs",
+                 "WyrdManager.cs", "WyrdNPC.cs"):
+        assert name in tests_csproj
+        assert (UNITY_PKG / "Runtime" / name).is_file()
+
+
+def test_e3_unity_asmdefs_and_editor_inspector():
+    runtime_asmdef = json.loads(
+        (UNITY_PKG / "Runtime" / "WyrdForge.Runtime.asmdef").read_text(
+            encoding="utf-8"))
+    assert runtime_asmdef["name"] == "WyrdForge.Runtime"
+    assert runtime_asmdef["noEngineReferences"] is False
+    editor_asmdef = json.loads(
+        (UNITY_PKG / "Editor" / "WyrdForge.Editor.asmdef").read_text(
+            encoding="utf-8"))
+    assert editor_asmdef["includePlatforms"] == ["Editor"]
+    assert "WyrdForge.Runtime" in editor_asmdef["references"]
+    inspector = (
+        UNITY_PKG / "Editor" / "WyrdManagerBehaviourEditor.cs"
+    ).read_text(encoding="utf-8")
+    assert "CustomEditor(typeof(WyrdManagerBehaviour))" in inspector
+    assert "HealthCheckAsync" in inspector  # an action the API supports
+    # The package docs state the .meta position honestly.
+    readme = (UNITY_PKG / "README.md").read_text(encoding="utf-8")
+    assert ".meta" in readme and "generates" in readme
+
+
+def test_e3_opensim_region_module_implements_iregionmodulebase():
+    host = (
+        OPENSIM_PKG / "WyrdForge.OpenSim.RegionModule"
+        / "WyrdForgeRegionModuleHost.cs"
+    ).read_text(encoding="utf-8")
+    assert "INonSharedRegionModule" in host
+    for member in ("Initialise", "Close()", "AddRegion(Scene",
+                   "RemoveRegion(Scene", "RegionLoaded(Scene",
+                   "ReplaceableInterface"):
+        assert member in host, f"host missing IRegionModuleBase member {member}"
+    assert "OnMakeRootAgent" in host and "OnChatFromClient" in host
+    # The deployment project exists and references the core project...
+    deploy_csproj = (
+        OPENSIM_PKG / "WyrdForge.OpenSim.RegionModule"
+        / "WyrdForge.OpenSim.RegionModule.csproj"
+    ).read_text(encoding="utf-8")
+    assert "WyrdForge.OpenSim.csproj" in deploy_csproj
+    assert "OpenSim.Framework" in deploy_csproj
+    # ...while the core project stays host-free (its xUnit suite's
+    # ProjectReference must keep making sense).
+    core_csproj = (
+        OPENSIM_PKG / "WyrdForge.OpenSim" / "WyrdForge.OpenSim.csproj"
+    ).read_text(encoding="utf-8")
+    assert "<Reference" not in core_csproj  # no framework references at all
+    assert "WyrdForge.Client.csproj" in core_csproj
+    tests_csproj = (
+        OPENSIM_PKG / "WyrdForge.OpenSim.Tests"
+        / "WyrdForge.OpenSim.Tests.csproj"
+    ).read_text(encoding="utf-8")
+    assert "WyrdForge.OpenSim.csproj" in tests_csproj
+
+
+def test_e3_cryengine_and_o3de_stubs_labelled_everywhere():
+    # Source-file headers.
+    cry_plugin = (
+        CRY_PKG / "Code" / "WyrdPlugin" / "WyrdPlugin.cpp"
+    ).read_text(encoding="utf-8")
+    assert "STUB" in cry_plugin
+    o3de_component = (
+        O3DE_PKG / "Code" / "Source" / "WyrdSystemComponent.h"
+    ).read_text(encoding="utf-8")
+    assert "STUB" in o3de_component
+    # Plugin/gem descriptor surfaces.
+    cry_json = json.loads(
+        (CRY_PKG / "WyrdForgePlugin.json").read_text(encoding="utf-8"))
+    assert "STUB" in cry_json["Description"]
+    gem_json = json.loads((O3DE_PKG / "gem.json").read_text(encoding="utf-8"))
+    assert "STUB" in gem_json["Summary"]
+    # Per-integration docs.
+    assert "STUB" in (CRY_PKG / "TESTING.md").read_text(encoding="utf-8")
+    assert "STUB" in (O3DE_PKG / "TESTING.md").read_text(encoding="utf-8")
+    # The integrations overview.
+    overview = (
+        REPO / "docs" / "integrations" / "overview.md"
+    ).read_text(encoding="utf-8")
+    assert "PARTIAL STUB" in overview  # CryEngine row
+    assert "STUB" in overview          # O3DE row
+    # The manifest itself states the stub status in both scopes.
+    m = _manifest()
+    assert "STUB" in m["integrations"]["cryengine"]["scope"]
+    assert "STUB" in m["integrations"]["o3de"]["scope"]
+
+
+def test_e3_implemented_host_free_logic_exists():
+    # CryEngine client core + O3DE helpers core are real shipped sources,
+    # and the manifest's reproduction section names their harnesses.
+    assert (CRY_PKG / "Code" / "WyrdPlugin" / "WyrdClientCore.cpp").is_file()
+    assert (O3DE_PKG / "Code" / "Source" / "WyrdHelpersCore.cpp").is_file()
+    assert (O3DE_PKG / "Code" / "Source" / "WyrdHelpers.cpp").is_file()
+    m = _manifest()
+    assert "cryengine_core_harness" in m["reproduction"]
+    assert "o3de_honest_harness" in m["reproduction"]
+    unity_scope = m["integrations"]["unity"]["scope"]
+    assert "MonoBehaviour" in unity_scope and "NOT been compiled" in unity_scope
+    opensim_scope = m["integrations"]["opensim"]["scope"]
+    assert "IRegionModuleBase" in opensim_scope
+    assert "NOT been compiled" in opensim_scope

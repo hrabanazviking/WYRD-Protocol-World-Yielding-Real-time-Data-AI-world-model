@@ -1,5 +1,13 @@
 #pragma once
 
+// IWyrdSystem.h — the CryEngine integration's interface contract.
+//
+// E3 status, plainly: the logic behind this interface is IMPLEMENTED in
+// WyrdClientCore (host-free, honest-harness-tested). The HTTP transport
+// and CryEngine plugin registration are STUBS — see the STUB notice at
+// the top of WyrdPlugin.cpp and TESTING.md before trusting this header's
+// usage examples in a real engine.
+
 #include <string>
 #include <vector>
 #include <functional>

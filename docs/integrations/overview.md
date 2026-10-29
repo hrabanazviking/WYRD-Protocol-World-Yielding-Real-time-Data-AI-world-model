@@ -18,6 +18,14 @@ Not every "tests" count below ever tested the shipped code. E1 classified all
   test the copy — drift is undetectable. These integrations are
   **experimental** until a host harness exists.
 
+E3 (2026-10-29) then made the host layers truthful: Unity gained real
+MonoBehaviours, `.asmdef` files, and the editor inspector; OpenSim gained
+a real `IRegionModuleBase` region module in a separate deployment project;
+CryEngine's client logic was implemented host-free (its transport stays a
+labelled stub); O3DE's previously declaration-only helpers were
+implemented (its component HTTP layer stays a labelled stub). The rows
+below and the manifest state exactly what is and is not verified.
+
 Mirror/logic test files are labelled as such in their own headers. Reproduce
 the honest harnesses:
 
@@ -32,6 +40,20 @@ g++ -std=c++17 -I integrations/cryengine/wyrdforge/Code/WyrdPlugin \
     integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdHelpers.cpp \
     -o /tmp/wyrd_cryengine_honest && /tmp/wyrd_cryengine_honest
 
+# CryEngine client-core honest harness (E3; also compiles WyrdPlugin.cpp)
+g++ -std=c++17 -I integrations/cryengine/wyrdforge/Code/WyrdPlugin \
+    integrations/cryengine/wyrdforge/tests/honest/WyrdClientCoreHonestTest.cpp \
+    integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdClientCore.cpp \
+    integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdHelpers.cpp \
+    integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdPlugin.cpp \
+    -o /tmp/wyrd_cryengine_core_honest && /tmp/wyrd_cryengine_core_honest
+
+# O3DE helpers-core honest harness (E3; compiles the shipped WyrdHelpersCore.cpp)
+g++ -std=c++17 -I integrations/o3de/wyrdforge/Code/Source \
+    integrations/o3de/wyrdforge/tests/honest/WyrdHelpersCoreHonestTest.cpp \
+    integrations/o3de/wyrdforge/Code/Source/WyrdHelpersCore.cpp \
+    -o /tmp/wyrd_o3de_honest && /tmp/wyrd_o3de_honest
+
 # JS SDK suite (ts-jest, imports the shipped src/)
 cd sdk/js && npm ci && npx jest
 ```
@@ -40,7 +62,7 @@ cd sdk/js && npm ci && npx jest
 
 | Engine | Language | Location | Test honesty (E1) |
 |---|---|---|---|
-| Unity | C# / UPM package | `integrations/unity/` | genuine-suite-elsewhere (51 xUnit, needs dotnet; plain C# classes, not MonoBehaviours — see E3) |
+| Unity | C# / UPM package | `integrations/unity/` | genuine-suite-elsewhere (51 xUnit for the plain-C# client, needs dotnet; E3 shipped real MonoBehaviours + .asmdef + editor inspector — the host layer is NOT compiled in Unity, no Unity exists here) |
 | Unreal Engine 5 | C++ / UE plugin | `integrations/unreal/` | **EXPERIMENTAL** — host-untested (61 Python mirror/logic tests only; C++ never compiled) |
 | Godot 4 | GDScript addon | `integrations/godot/` | **EXPERIMENTAL** — host-untested (25 Python mirror/logic tests only; no Godot binary) |
 | RPG Maker MZ/MV | JavaScript | `integrations/rpgmaker/` | honest-executed (7 node honest tests; older Jest file is mirror/logic) |
@@ -48,8 +70,8 @@ cd sdk/js && npm ci && npx jest
 | Construct 3 | JavaScript | `integrations/construct3/` | honest-executed (7 node honest tests, runtime instance; editor plugin not executed) |
 | MonoGame / FNA | C# / NuGet | `integrations/monogame/` | genuine-suite-elsewhere (41 xUnit, needs dotnet) |
 | Defold | C++ + Lua | `integrations/defold/` | **EXPERIMENTAL** — host-untested (46 Python mirror/logic tests only) |
-| CryEngine | C++ / plugin | `integrations/cryengine/` | honest-executed for `WyrdHelpers` only (21 g++ checks on the shipped C++); plugin glue host-untested in-engine |
-| O3DE / Lumberyard | C++ / Gem | `integrations/o3de/` | **EXPERIMENTAL** — host-untested (60 Python mirror/logic tests only) |
+| CryEngine | C++ / plugin | `integrations/cryengine/` | honest-executed for `WyrdHelpers` (21 g++ checks) + client core logic (31 g++ checks, E3); **PARTIAL STUB** — no HTTP transport (libcurl) bound and no plugin registration, so not a working in-engine plugin |
+| O3DE / Lumberyard | C++ / Gem | `integrations/o3de/` | honest-executed for the helpers logic core (21 g++ checks, E3); **STUB** — the component's HTTP layer (`PostAsync`/`HealthCheck`) is TODO no-ops and the AZ adapter/component have never been compiled |
 | Pygame | Python | `integrations/pygame/` | honest-executed (73 pytest, imports the shipped modules) |
 
 ## AI Companion Bridges
@@ -78,7 +100,7 @@ cd sdk/js && npm ci && npx jest
 
 | Platform | Language | Location | Test honesty (E1) |
 |---|---|---|---|
-| OpenSim / Second Life | C# + LSL | `integrations/opensim/` | genuine-suite-elsewhere for the C# (46 xUnit, needs dotnet); LSL side host-untested in-world |
+| OpenSim / Second Life | C# + LSL | `integrations/opensim/` | genuine-suite-elsewhere for the C# bridge core (46 xUnit, needs dotnet); E3 shipped a real `IRegionModuleBase` region module (deployment project, needs an OpenSim install to build — not compiled here); LSL side host-untested in-world |
 | Minecraft (Fabric) | Java | `integrations/minecraft/` | **EXPERIMENTAL** — host-untested (74 Python mirror/logic tests only; Java never compiled) |
 | Roblox | Luau | `integrations/roblox/` | **EXPERIMENTAL** — host-untested (63 Python mirror/logic tests only) |
 

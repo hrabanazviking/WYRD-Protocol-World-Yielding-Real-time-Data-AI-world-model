@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    WyrdForge.OpenSim.RegionModule — the DEPLOYMENT project (E3).
+
+    This project contains exactly one thing: WyrdForgeRegionModuleHost,
+    the real OpenSim region module implementing INonSharedRegionModule /
+    IRegionModuleBase on top of the host-free WyrdForge.OpenSim bridge.
+
+    It references the OpenSim assemblies from YOUR OpenSim installation's
+    bin/ directory, because those assemblies are the deployment target and
+    are not redistributable from this repo. Point OpenSimBin at that
+    directory when building:
+
+        dotnet build -p:OpenSimBin=/path/to/opensim/bin
+
+    The references are Private=false: at runtime the simulator's own
+    copies in bin/ are used. This project is deliberately NOT part of
+    WyrdForge.OpenSim.sln — it cannot build on a machine without OpenSim,
+    and the solution must stay buildable (and the xUnit suite runnable)
+    with nothing but the dotnet SDK.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>WyrdForge.OpenSim.RegionModule</AssemblyName>
+    <RootNamespace>WyrdForge.OpenSim</RootNamespace>
+    <OpenSimBin Condition="'$(OpenSimBin)' == ''">opensim-bin-not-set</OpenSimBin>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WyrdForge.OpenSim\WyrdForge.OpenSim.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="OpenSim.Framework">
+      <HintPath>$(OpenSimBin)\OpenSim.Framework.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenSim.Region.Framework">
+      <HintPath>$(OpenSimBin)\OpenSim.Region.Framework.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenMetaverse">
+      <HintPath>$(OpenSimBin)\OpenMetaverse.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Nini">
+      <HintPath>$(OpenSimBin)\Nini.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Mono.Addins">
+      <HintPath>$(OpenSimBin)\Mono.Addins.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

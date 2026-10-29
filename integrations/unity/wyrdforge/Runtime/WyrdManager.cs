@@ -10,39 +10,27 @@ using System.Threading.Tasks;
 namespace WyrdForge.Unity
 {
     /// <summary>
-    /// WyrdManager — Singleton entry point for the WyrdForge Unity integration.
+    /// WyrdManager — plain-C# client for the WyrdForge Unity integration.
     ///
-    /// Place this on a persistent GameObject (DontDestroyOnLoad).
-    /// All WyrdNPC components auto-register with this manager on Start().
+    /// This class is deliberately Unity-free so it can be unit-tested with
+    /// plain dotnet (the xUnit suite Compile-Includes it). The Unity host
+    /// layer lives beside it (E3):
     ///
     /// ─── WIRE-UP GUIDE ───────────────────────────────────────────────────────
     ///
     /// 1. Create an empty GameObject named "WyrdManager".
-    /// 2. Attach this script and configure Options (host, port, timeout).
-    /// 3. Call DontDestroyOnLoad(gameObject) in Awake() for scene persistence.
-    /// 4. In NPC scripts:
-    ///      StartCoroutine(WyrdManager.Instance.QueryCoroutine(
-    ///          "sigrid_npc", playerInput, reply => npcText.text = reply));
-    ///
-    /// 5. For editor tooling (optional), add a custom Editor window that calls
-    ///    WyrdManager.Instance.HealthCheck() and displays entity registry state.
-    ///
-    /// ─── UNITY COROUTINE PATTERN ─────────────────────────────────────────────
-    ///
-    ///   // Using UnityWebRequest (recommended for build compatibility):
-    ///   IEnumerator QueryCoroutine(string personaId, string input, Action&lt;string&gt; onComplete)
-    ///   {
-    ///       var req = new UnityWebRequest(Options.BaseUrl() + "/query", "POST");
-    ///       var body = WyrdEntityData.BuildQueryBody(personaId, input);
-    ///       req.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));
-    ///       req.downloadHandler = new DownloadHandlerBuffer();
-    ///       req.SetRequestHeader("Content-Type", "application/json");
-    ///       yield return req.SendWebRequest();
-    ///       if (req.result == UnityWebRequest.Result.Success)
-    ///           onComplete(WyrdEntityData.ParseResponse(req.downloadHandler.text));
-    ///       else
-    ///           onComplete(Options.FallbackResponse);
-    ///   }
+    /// 2. Add the WyrdManagerBehaviour component and configure its
+    ///    connection settings in the Inspector (host, port, timeout).
+    ///    The behaviour creates this manager in Awake and publishes it
+    ///    as WyrdManager.Instance.
+    /// 3. Add WyrdNPCBehaviour to NPC GameObjects; they auto-register
+    ///    on Start when the manager's AutoRegisterNPCs option is on.
+    /// 4. In NPC scripts, use the behaviours' coroutines:
+    ///      StartCoroutine(npcBehaviour.QueryCoroutine(
+    ///          playerInput, reply => npcText.text = reply));
+    /// 5. Editor tooling: select the WyrdManager GameObject — the custom
+    ///    inspector (Editor/WyrdManagerBehaviourEditor.cs) shows status
+    ///    and offers health-check / test-query actions.
     ///
     /// ─────────────────────────────────────────────────────────────────────────
     /// </summary>
@@ -116,6 +104,15 @@ namespace WyrdForge.Unity
         }
 
         public int EntityCount { get { lock (_lock) { return _entities.Count; } } }
+
+        /// <summary>
+        /// Snapshot of the registered persona_ids (additive in E3, for the
+        /// Unity editor inspector). Returns a copy; mutating it is harmless.
+        /// </summary>
+        public System.Collections.Generic.IReadOnlyList<string> RegisteredPersonaIds
+        {
+            get { lock (_lock) { return new System.Collections.Generic.List<string>(_entities.Keys); } }
+        }
 
         // -------------------------------------------------------------------------
         // Query (async)

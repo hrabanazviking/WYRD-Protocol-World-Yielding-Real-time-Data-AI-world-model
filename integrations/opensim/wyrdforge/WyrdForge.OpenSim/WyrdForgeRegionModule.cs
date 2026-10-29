@@ -1,24 +1,25 @@
-// WyrdForgeRegionModule.cs — WYRD Protocol OpenSim region module (Phase 12A).
+// WyrdForgeRegionModule.cs — WYRD Protocol OpenSim bridge core (Phase 12A).
 //
-// This class implements the OpenSim IRegionModuleBase pattern.
-// It wraps WyrdForge.Client to provide:
-//   - Avatar sync on region entry (OnMakeRootAgent)
-//   - Context queries via in-world chat commands (OnChatFromClient)
-//   - Admin console commands
-//   - Health monitoring
+// This class is the host-free bridge core. It wraps WyrdForge.Client to
+// provide the operations the region module serves:
+//   - Avatar sync (SyncAvatarAsync)
+//   - Context queries via in-world chat commands (DispatchChatCommandAsync)
+//   - Health monitoring (IsHealthyAsync)
 //
-// OPENSIM DEPLOYMENT
-// ------------------
-// 1. Build this project and copy WyrdForge.OpenSim.dll + WyrdForge.Client.dll
-//    to your OpenSim bin/ directory.
-// 2. Add to OpenSim.ini [Modules] section:
-//    WyrdForgeModule = true
-// 3. In [WyrdForge] section set Host and Port to your WyrdHTTPServer address.
-// 4. The module auto-discovers via OpenSim's IRegionModuleBase reflection loader.
+// It deliberately does NOT implement IRegionModuleBase itself: that
+// interface's types (Scene, IConfigSource, ...) live in the OpenSim
+// assemblies, and this project must stay compilable and unit-testable
+// with nothing but the dotnet SDK.
 //
-// IRegionModuleBase WIRING (add when referencing OpenSim.Framework.dll):
-//   public class WyrdForgeRegionModule : IRegionModuleBase { ... }
-//   and wire the events shown in the comments below.
+// OPENSIM DEPLOYMENT (E3 — the host now ships)
+// --------------------------------------------
+// The real region module is WyrdForgeRegionModuleHost in the sibling
+// project WyrdForge.OpenSim.RegionModule: it implements
+// INonSharedRegionModule / IRegionModuleBase, reads the [WyrdForge]
+// section of OpenSim.ini in Initialise, wires this bridge to the
+// region's events in AddRegion, and unwires them in RemoveRegion.
+// Build THAT project against your OpenSim bin/ directory and deploy
+// as its README.md describes.
 
 using WyrdForge.Client;
 
@@ -62,43 +63,33 @@ public sealed class WyrdForgeRegionModule : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // IRegionModuleBase lifecycle (wire these when referencing OpenSim.Framework)
+    // Module-shaped surface (the host in WyrdForge.OpenSim.RegionModule
+    // exposes the real IRegionModuleBase members; these remain so the
+    // bridge core carries the module's name without an OpenSim reference)
     // -------------------------------------------------------------------------
 
-    /// <summary>
-    /// Module name — returned to OpenSim's module loader.
-    /// Maps to: public string Name => "WyrdForge";
-    /// </summary>
+    /// <summary>Module name — the host reports the same name to OpenSim's loader.</summary>
     public string Name => "WyrdForge";
 
     /// <summary>
-    /// Called when the module is added to a region.
-    /// Wire OpenSim events here, for example:
-    ///
-    ///   scene.EventManager.OnMakeRootAgent  += OnAvatarEnterRegion;
-    ///   scene.EventManager.OnClientClosed   += OnAvatarLeaveRegion;
-    ///   scene.EventManager.OnChatFromClient += OnChatFromClient;
-    ///   scene.EventManager.OnChatBroadcast  += OnChatFromClient;
+    /// Host-free stand-in kept for API compatibility: the REAL AddRegion
+    /// (Scene-typed, event-wiring) is WyrdForgeRegionModuleHost.AddRegion
+    /// in the deployment project. This overload intentionally does
+    /// nothing — there is no Scene to wire without OpenSim.Framework.
     /// </summary>
-    public void AddRegion(/* Scene scene */ object scene)
+    public void AddRegion(object scene)
     {
-        // Wire events here when OpenSim.Framework is referenced.
-        // Example:
-        //   if (scene is Scene s)
-        //   {
-        //       s.EventManager.OnMakeRootAgent  += OnAvatarEnterRegion;
-        //       s.EventManager.OnClientClosed   += OnAvatarLeaveRegion;
-        //       s.EventManager.OnChatFromClient += OnChatFromClient;
-        //   }
+        // No-op by design (see summary). Event wiring lives in the host.
     }
 
     /// <summary>
-    /// Called when the module is removed from a region.
-    /// Unwire all events here.
+    /// Host-free stand-in kept for API compatibility: the REAL
+    /// RemoveRegion is WyrdForgeRegionModuleHost.RemoveRegion in the
+    /// deployment project. This overload intentionally does nothing.
     /// </summary>
-    public void RemoveRegion(/* Scene scene */ object scene)
+    public void RemoveRegion(object scene)
     {
-        // Unwire events here when OpenSim.Framework is referenced.
+        // No-op by design (see summary). Event unwiring lives in the host.
     }
 
     // -------------------------------------------------------------------------

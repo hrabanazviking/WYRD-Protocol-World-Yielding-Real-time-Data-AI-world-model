@@ -1,6 +1,14 @@
 // WyrdSystemComponent.cpp — O3DE AZ::Component implementation.
 //
-// HTTP is done via AzFramework::HttpRequestor (O3DE's built-in HTTP system).
+// ═══ STUB ═══ PostAsync() and HealthCheck() below are TODO no-ops:
+// no HTTP request is ever sent by this component. The AzFramework::
+// HttpRequestor sketch that follows is the intended implementation
+// pattern for a real O3DE project — it is documentation, not code
+// that runs. See the STUB notice in WyrdSystemComponent.h and
+// TESTING.md before trusting anything in this file.
+// ════════════
+//
+// HTTP is intended via AzFramework::HttpRequestor (O3DE's built-in HTTP system).
 //
 // ─── AzFramework::HttpRequestor usage ────────────────────────────────────────
 //

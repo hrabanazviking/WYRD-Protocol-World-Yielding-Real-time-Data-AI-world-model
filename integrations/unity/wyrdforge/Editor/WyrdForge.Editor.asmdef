@@ -1,0 +1,1 @@
+{"allowUnsafeCode":false,"autoReferenced":true,"defineConstraints":[],"excludePlatforms":[],"includePlatforms":["Editor"],"name":"WyrdForge.Editor","noEngineReferences":false,"overrideReferences":false,"precompiledReferences":[],"references":["WyrdForge.Runtime"],"rootNamespace":"WyrdForge.Unity.Editor","versionDefines":[]}

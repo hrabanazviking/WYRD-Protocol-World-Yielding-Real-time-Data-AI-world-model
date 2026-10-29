@@ -1,97 +1,111 @@
-// WyrdPlugin.cpp — CryEngine ICryPlugin implementation for WyrdForge.
+// WyrdPlugin.cpp — CryEngine plugin shell for WyrdForge.
 //
-// Uses libcurl for HTTP (CryEngine's preferred HTTP approach for plugins).
-// For async calls, pushes completed work to a queue drained on the game thread
-// via IPluginManager::Update() / IEntityComponent::Update().
+// ═══ STUB — READ BEFORE TRUSTING ════════════════════════════════════════
 //
-// ─── CRYENGINE SETUP ──────────────────────────────────────────────────────────
+// This file is a STUB at exactly one layer: the HTTP transport.
 //
-//  1. Register the plugin in your .cryproject:
-//       "plugins": [{ "guid": "...", "path": "WyrdForge" }]
+// As of E3 the client LOGIC is real: every IWyrdSystem method below
+// delegates to WyrdClientCore (WyrdClientCore.h/.cpp), which builds the
+// request bodies, parses responses, applies the silent/fallback error
+// semantics, and queues completions for the game thread — and which is
+// compiled and executed by the honest harness
+// (tests/honest/WyrdClientCoreHonestTest.cpp).
 //
-//  2. Access the system:
-//       IWyrdSystem* pWyrd = gEnv->pSystem->GetIPluginManager()
-//           ->QueryPlugin<IWyrdSystem>();
+// What does NOT exist anywhere in this repo:
+//   - a libcurl (or CryEngine HTTP) transport bound to that core, and
+//   - CryEngine plugin registration (ICryPlugin / plugin-manager glue —
+//     its shape varies across CE 5.6 / 5.7 / Lumberyard-era forks).
 //
-//  3. In an entity component's Initialize():
-//       pWyrd->SetConfig({ "your.server.ip", 8765 });
+// With no transport bound, the core fails honestly: GetLastError()
+// reports "no HTTP transport bound", and queries complete (via
+// DrainCompletions) with a Failure result, or with the configured
+// fallback text in silent mode. Nothing silently pretends to work.
+// Binding a transport in a real CryEngine project means implementing
+// IWyrdTransport over libcurl and calling SetTransport() — one class,
+// two methods (Post/Get).
 //
-//  4. In response to player chat / dialogue trigger:
-//       pWyrd->QueryAsync("sigrid_npc", playerInput,
-//           [this](WyrdForge::WyrdQueryResult r)
-//           {
-//               GetDialogueComponent()->ShowText(r.response);
-//           });
+// This file includes no CryEngine headers, so it compiles anywhere the
+// core compiles (the honest harness build proves that much). In-engine
+// behaviour is NOT verified: no CryEngine exists on the machine that
+// produced E3. See TESTING.md for the full honesty picture.
+// ════════════════════════════════════════════════════════════════════════
 //
-//  5. On entity spawn:
-//       pWyrd->SyncEntity(personaId, WyrdHelpers::ToFacts(
-//           entity->GetName(), entity->GetGuidAsString(), levelName, {}));
+// Usage inside a CryEngine project (once a transport is bound):
 //
-// ─────────────────────────────────────────────────────────────────────────────
+//   IWyrdSystem* pWyrd = ...;  // your plugin-manager lookup
+//   pWyrd->SetConfig({ "your.server.ip", 8765 });
+//   pWyrd->QueryAsync("sigrid_npc", playerInput,
+//       [this](WyrdForge::WyrdQueryResult r)
+//       {
+//           GetDialogueComponent()->ShowText(r.response);
+//       });
+//   // once per tick, on the game thread:
+//   plugin->DrainCompletions();
 
 #include "IWyrdSystem.h"
+#include "WyrdClientCore.h"
 #include "WyrdHelpers.h"
-
-// NOTE: Full libcurl implementation omitted — CryEngine plugin systems vary
-// significantly across CE versions (5.6, 5.7, LY fork). The interface above
-// (IWyrdSystem) is the stable contract; the HTTP backend is swappable.
-// A reference curl implementation would use:
-//   curl_easy_setopt(curl, CURLOPT_URL, config.baseUrl() + path);
-//   curl_easy_setopt(curl, CURLOPT_POST, 1L);
-//   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-//   curl_easy_setopt(curl, CURLOPT_TIMEOUT, config.timeoutSeconds);
-//   curl_easy_perform(curl);
-// wrapped in a std::async / CryEngine threadpool task, with results queued
-// to the game thread via a mutex-protected std::queue<std::function<void()>>.
 
 namespace WyrdForge
 {
 
+/// <summary>
+/// The CryEngine-facing IWyrdSystem shell. All logic lives in
+/// WyrdClientCore; this class only delegates (and, in a real deployment,
+/// is where plugin registration + the libcurl transport binding belong).
+/// </summary>
 class WyrdPlugin final : public IWyrdSystem
 {
 public:
-    void SetConfig(const WyrdConfig& config) override { m_config = config; }
-    const WyrdConfig& GetConfig() const override      { return m_config;  }
+    void SetConfig(const WyrdConfig& config) override { m_core.SetConfig(config); }
+    const WyrdConfig& GetConfig() const override      { return m_core.GetConfig(); }
 
     void QueryAsync(const std::string& personaId,
                     const std::string& userInput,
                     std::function<void(WyrdQueryResult)> onComplete) override
     {
-        // TODO: dispatch to libcurl thread, queue onComplete for game-thread drain
-        (void)personaId; (void)userInput; (void)onComplete;
+        m_core.QueryAsync(personaId, userInput, std::move(onComplete));
     }
 
     void PushObservation(const std::string& title,
                          const std::string& summary) override
     {
-        // TODO: async libcurl POST /event with BuildObservationBody
-        (void)title; (void)summary;
+        m_core.PushObservation(title, summary);
     }
 
     void PushFact(const std::string& subjectId,
                   const std::string& key,
                   const std::string& value) override
     {
-        (void)subjectId; (void)key; (void)value;
+        m_core.PushFact(subjectId, key, value);
     }
 
     void SyncEntity(const std::string& personaId,
                     const std::vector<WyrdFact>& facts) override
     {
-        for (const auto& f : facts)
-            PushFact(personaId, f.key, f.value);
+        m_core.SyncEntity(personaId, facts);
     }
 
     void HealthCheckAsync(std::function<void(bool)> onResult) override
     {
-        (void)onResult;
+        m_core.HealthCheckAsync(std::move(onResult));
     }
 
-    const std::string& GetLastError() const override { return m_lastError; }
+    const std::string& GetLastError() const override { return m_core.GetLastError(); }
+
+    /// <summary>Bind the HTTP transport (the libcurl layer a deployment
+    /// supplies). Not part of IWyrdSystem; without it the core reports
+    /// the no-transport error described in the file header.</summary>
+    void SetTransport(std::shared_ptr<IWyrdTransport> transport)
+    {
+        m_core.SetTransport(std::move(transport));
+    }
+
+    /// <summary>Run queued completions — call once per tick on the game thread.</summary>
+    std::size_t DrainCompletions() { return m_core.DrainCompletions(); }
 
 private:
-    WyrdConfig  m_config;
-    std::string m_lastError;
+    WyrdClientCore m_core;
 };
 
 } // namespace WyrdForge

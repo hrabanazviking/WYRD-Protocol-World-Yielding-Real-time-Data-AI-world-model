@@ -4,7 +4,7 @@
     "Uuid": "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
     "Name": "WyrdForge",
     "DisplayName": "WyrdForge",
-    "Summary": "WYRD Protocol bridge for O3DE — grounds NPC dialogue and entity state in a deterministic ECS world model via WyrdHTTPServer.",
+    "Summary": "WYRD Protocol bridge for O3DE — STUB: the system component's HTTP layer (PostAsync/HealthCheck) is not implemented, so nothing reaches a server yet; the helper logic is implemented and host-free tested. See TESTING.md.",
     "Tags": ["AI", "NPC", "WorldModel"],
     "IconPath": "preview.png",
     "Requirements": "",

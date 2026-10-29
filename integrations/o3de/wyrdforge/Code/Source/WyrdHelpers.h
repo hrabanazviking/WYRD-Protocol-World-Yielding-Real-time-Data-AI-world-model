@@ -9,7 +9,13 @@ namespace WyrdForge
 
 /**
  * WyrdHelpers — pure static helpers for WyrdForge O3DE Gem.
- * No AzFramework or engine runtime dependency — fully testable.
+ * No AzFramework or engine runtime dependency.
+ *
+ * E3: these declarations finally have implementations — WyrdHelpers.cpp
+ * is a thin AZStd adapter over WyrdHelpersCore (pure standard C++),
+ * which is compiled and executed by tests/honest. Before E3 no
+ * implementation existed at all. The adapter itself is not compiled
+ * without the AZ framework; see TESTING.md.
  */
 class WyrdHelpers
 {

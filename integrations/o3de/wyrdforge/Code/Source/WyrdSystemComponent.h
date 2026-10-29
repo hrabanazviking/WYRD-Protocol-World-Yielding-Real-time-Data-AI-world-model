@@ -9,6 +9,20 @@ namespace WyrdForge
 /**
  * WyrdSystemComponent — O3DE AZ::Component that implements WyrdRequestBus.
  *
+ * ═══ STUB — READ BEFORE TRUSTING ═══════════════════════════════════
+ * This component is a STUB at its HTTP layer: PostAsync() and
+ * HealthCheck() in WyrdSystemComponent.cpp are TODO no-ops, so
+ * QueryNPC / PushObservation / PushFact currently deliver NOTHING —
+ * they build a request body (via the now-implemented WyrdHelpers) and
+ * then drop it. The reflection/lifecycle/bus wiring around them is
+ * real code, and the helper algorithms are implemented and host-free
+ * tested (WyrdHelpersCore), but no query or push reaches a server
+ * through this component until PostAsync is implemented over
+ * AzFramework::HttpRequestor inside a real O3DE project. Nothing in
+ * this Gem has been compiled: no O3DE exists on the machine that
+ * produced E3. See TESTING.md in this Gem for the full picture.
+ * ═══════════════════════════════════════════════════════════════════
+ *
  * Add this component to your Level entity or a persistent entity in your game.
  *
  * ─── WIRE-UP GUIDE ───────────────────────────────────────────────────────────

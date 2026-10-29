@@ -19,12 +19,12 @@
     },
     "cryengine": {
       "classification": "honest-executed",
-      "executed_here": "g++ -std=c++17 compile + run: 21 checks passed (E1 session)",
+      "executed_here": "g++ -std=c++17 compile + run: 21 checks passed (WyrdHelpers, E1 session); 31 checks passed (WyrdClientCore + WyrdPlugin.cpp compile, E3 session)",
       "honest_harness": "integrations/cryengine/wyrdforge/tests/honest/WyrdHelpersHonestTest.cpp",
       "kind": "integration",
       "language": "C++ (CryEngine plugin)",
       "previous_tests": "Python mirror tests (test a Python copy). Kept and relabelled as mirror/logic tests in E1.",
-      "scope": "Covers WyrdHelpers (pure standard C++, no CryEngine dependency \u2014 its own header says so) compiled with g++ from the shipped source. The plugin glue WyrdPlugin.cpp needs CryEngine and is NOT executed; the integration as a whole remains host-untested in-engine.",
+      "scope": "Covers WyrdHelpers (pure standard C++) and, as of E3, WyrdClientCore \u2014 the client logic (body building via the helpers, response parsing, silent/fallback semantics, game-thread completion queue) behind an injected IWyrdTransport \u2014 both compiled with g++ from the shipped sources and executed here; the build also compiles the shipped WyrdPlugin.cpp shell host-free. STUB, labelled in every surface: no HTTP transport (libcurl) is bound to the core and there is no CryEngine plugin registration, so this is NOT a working in-engine plugin; with no transport bound, operations record an explicit no-transport error. In-engine behaviour is unverified.",
       "shipped": [
         "integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdHelpers.cpp"
       ]
@@ -127,14 +127,15 @@
       ]
     },
     "o3de": {
-      "classification": "experimental-host-untested",
-      "executed_here": "Not executed. Python mirror suite: 60 passed as mirror/logic tests (E1 session).",
-      "honest_harness": null,
+      "classification": "honest-executed",
+      "executed_here": "g++ -std=c++17 compile + run: 21 checks passed (WyrdHelpersCore, E3 session). Python mirror suite: 60 passed as mirror/logic tests (E1 session).",
+      "honest_harness": "integrations/o3de/wyrdforge/tests/honest/WyrdHelpersCoreHonestTest.cpp",
       "kind": "integration",
       "language": "C++ (O3DE Gem)",
       "previous_tests": "Python mirror tests (test a copy). Kept and relabelled in E1.",
-      "scope": "The helpers use AZStd/AzCore types and the component needs the O3DE runtime; neither can be compiled or run without O3DE.",
+      "scope": "Covers WyrdHelpersCore: the helper algorithms (persona normalisation, JSON escaping, body builders, response parsing, fact assembly) implemented in E3 as pure standard C++ \u2014 before E3, WyrdHelpers.h declared them with NO implementation anywhere. The AZStd-typed WyrdHelpers.cpp adapter over the core is NOT compiled here (no AZ framework headers). STUB, labelled in every surface: WyrdSystemComponent's PostAsync/HealthCheck are TODO no-ops, so the component delivers nothing to a server; the component and its reflection code have never been compiled and in-engine behaviour is unverified.",
       "shipped": [
+        "integrations/o3de/wyrdforge/Code/Source/WyrdHelpersCore.cpp",
         "integrations/o3de/wyrdforge/Code/Source/WyrdSystemComponent.cpp"
       ]
     },
@@ -145,9 +146,10 @@
       "kind": "integration",
       "language": "C# + LSL (OpenSim)",
       "previous_tests": "The xUnit suite itself is genuine for the C# side (ProjectReference). The LSL script has no tests anywhere.",
-      "scope": "C# suite needs the dotnet SDK (absent here). The LSL side is host-untested in-world.",
+      "scope": "C# bridge-core suite needs the dotnet SDK (absent here). E3 implemented IRegionModuleBase for real: WyrdForgeRegionModuleHost (in the separate WyrdForge.OpenSim.RegionModule deployment project) implements INonSharedRegionModule (Initialise/Close/Name/AddRegion/RemoveRegion/RegionLoaded + ReplaceableInterface; non-shared chosen deliberately \u2014 one bridge per region), reads the [WyrdForge] OpenSim.ini section, and wires the bridge to OnMakeRootAgent/OnChatFromClient. The OpenSim.Framework dependency is isolated in that deployment project (built against an OpenSim bin/ directory); the core project and its xUnit suite stay host-free. The host project has NOT been compiled here (no dotnet, no OpenSim) and not run in a region. The LSL side is unchanged and host-untested in-world.",
       "shipped": [
-        "integrations/opensim/wyrdforge/WyrdForge.OpenSim/WyrdForgeRegionModule.cs"
+        "integrations/opensim/wyrdforge/WyrdForge.OpenSim/WyrdForgeRegionModule.cs",
+        "integrations/opensim/wyrdforge/WyrdForge.OpenSim.RegionModule/WyrdForgeRegionModuleHost.cs"
       ]
     },
     "owlbear": {
@@ -226,14 +228,15 @@
     },
     "unity": {
       "classification": "genuine-suite-elsewhere",
-      "executed_here": "Not executed here (no dotnet).",
+      "executed_here": "Not executed here (no dotnet, no Unity).",
       "honest_harness": "integrations/unity/wyrdforge/WyrdForge.Unity.Tests (xUnit, Compile Include of the shipped Runtime sources)",
       "kind": "integration",
-      "language": "C# (Unity package \u2014 plain C# classes, not MonoBehaviours; see E3)",
+      "language": "C# (Unity package \u2014 plain C# client + real MonoBehaviours, .asmdef and editor inspector as of E3)",
       "previous_tests": "The xUnit suite itself is genuine: its csproj Compile-Includes the shipped Runtime/*.cs files, so it compiles the real source.",
-      "scope": "Needs the dotnet SDK (absent here). The suite compiles the plain C# classes; it does not prove behaviour inside Unity (that is E3's host-truth work).",
+      "scope": "Needs the dotnet SDK (absent here) for the xUnit suite, which Compile-Includes only the four plain-C# Runtime files. E3 added the real Unity host layer: WyrdManagerBehaviour + WyrdNPCBehaviour (genuine MonoBehaviours wrapping the client), Runtime/WyrdForge.Runtime.asmdef, Editor/WyrdForge.Editor.asmdef, and a CustomEditor inspector for WyrdManagerBehaviour (connection settings, live status, health-check/test-query actions). The host layer and the plain client have NOT been compiled in Unity or by dotnet on this machine, and in-Unity behaviour is unverified. No .meta files ship; Unity generates them on import (stated in the package README).",
       "shipped": [
-        "integrations/unity/wyrdforge/Runtime/WyrdManager.cs"
+        "integrations/unity/wyrdforge/Runtime/WyrdManager.cs",
+        "integrations/unity/wyrdforge/Runtime/WyrdManagerBehaviour.cs"
       ]
     },
     "unreal": {
@@ -251,6 +254,18 @@
   },
   "introduced": "E1 (Phase E) \u2014 roadmap section 1.3 / item E1",
   "manifest": "wyrd-integration-test-honesty/1",
+  "reproduction": {
+    "cryengine_core_harness": "g++ -std=c++17 -I integrations/cryengine/wyrdforge/Code/WyrdPlugin integrations/cryengine/wyrdforge/tests/honest/WyrdClientCoreHonestTest.cpp integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdClientCore.cpp integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdHelpers.cpp integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdPlugin.cpp -o /tmp/wyrd_cryengine_core_honest && /tmp/wyrd_cryengine_core_honest",
+    "cryengine_honest_harness": "g++ -std=c++17 -I integrations/cryengine/wyrdforge/Code/WyrdPlugin integrations/cryengine/wyrdforge/tests/honest/WyrdHelpersHonestTest.cpp integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdHelpers.cpp -o /tmp/wyrd_cryengine_honest && /tmp/wyrd_cryengine_honest",
+    "e3_host_layers": "Unity MonoBehaviours/.asmdef/editor inspector and the OpenSim IRegionModuleBase host are NOT reproducible on this machine: no dotnet SDK, no Unity, no OpenSim exist here. First machine with dotnet should run the Unity and OpenSim xUnit suites; first Unity import and first OpenSim deployment-project build are the real verification steps. E3 updated this manifest's unity/opensim/cryengine/o3de entries to the new truth.",
+    "js_honest_harnesses": "From the repo root, per integration: node --experimental-vm-modules --test integrations/<name>/wyrdforge/tests/honest.test.mjs  (the --experimental-vm-modules flag is REQUIRED for the five harnesses that load the shipped file via vm.SourceTextModule - dndbeyond, foundry, owlbear, roll20, sillytavern; construct3 and rpgmaker load via vm.Script and also pass with the flag, so the flagged form is the one uniform invocation for all seven. Without the flag the five vm-module harnesses fail on vm.SourceTextModule.)",
+    "o3de_honest_harness": "g++ -std=c++17 -I integrations/o3de/wyrdforge/Code/Source integrations/o3de/wyrdforge/tests/honest/WyrdHelpersCoreHonestTest.cpp integrations/o3de/wyrdforge/Code/Source/WyrdHelpersCore.cpp -o /tmp/wyrd_o3de_honest && /tmp/wyrd_o3de_honest",
+    "pygame_suite": "PYTHONPATH=integrations/pygame/wyrdforge pytest integrations/pygame/wyrdforge/tests/test_wyrdforge.py",
+    "python_mirror_suites": "pytest <path named in the entry's previous_tests / the file itself> - each such file is labelled MIRROR / LOGIC TESTS in its own header; these counts are logic-spec counts, never shipped-code evidence",
+    "sdk_js_build": "cd sdk/js && rm -rf dist && npm run build  (tsc CommonJS pass + scripts/build-esm.mjs: rewrites dist/*.js to .cjs and recompiles module ESNext to .mjs with specifiers rewritten; then plain-node smoke: require dist/index.cjs and import dist/index.mjs, construct WyrdClient)",
+    "sdk_js_suite": "cd sdk/js && npm ci && npx jest  (ts-jest; imports the shipped src/)",
+    "verified": "All executed_here counts in this manifest were re-measured by the E1 completion session on 2026-10-29 (node v24, g++ 13, dedicated campaign venv) and reproduced exactly. The E3 counts (CryEngine client core 31 checks, O3DE helpers core 21 checks) were re-measured by the E3 completion session on 2026-10-29 with the same toolchains, alongside re-runs of the E1 harnesses (CryEngine helpers 21, JS honest 52, sdk/js jest 30) \u2014 all reproduced exactly."
+  },
   "sdks": {
     "sdk/csharp": {
       "classification": "genuine-suite-elsewhere",
@@ -288,14 +303,5 @@
         "sdk/js/src/client.ts"
       ]
     }
-  },
-  "reproduction": {
-    "js_honest_harnesses": "From the repo root, per integration: node --experimental-vm-modules --test integrations/<name>/wyrdforge/tests/honest.test.mjs  (the --experimental-vm-modules flag is REQUIRED for the five harnesses that load the shipped file via vm.SourceTextModule - dndbeyond, foundry, owlbear, roll20, sillytavern; construct3 and rpgmaker load via vm.Script and also pass with the flag, so the flagged form is the one uniform invocation for all seven. Without the flag the five vm-module harnesses fail on vm.SourceTextModule.)",
-    "cryengine_honest_harness": "g++ -std=c++17 -I integrations/cryengine/wyrdforge/Code/WyrdPlugin integrations/cryengine/wyrdforge/tests/honest/WyrdHelpersHonestTest.cpp integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdHelpers.cpp -o /tmp/wyrd_cryengine_honest && /tmp/wyrd_cryengine_honest",
-    "sdk_js_suite": "cd sdk/js && npm ci && npx jest  (ts-jest; imports the shipped src/)",
-    "python_mirror_suites": "pytest <path named in the entry's previous_tests / the file itself> - each such file is labelled MIRROR / LOGIC TESTS in its own header; these counts are logic-spec counts, never shipped-code evidence",
-    "pygame_suite": "PYTHONPATH=integrations/pygame/wyrdforge pytest integrations/pygame/wyrdforge/tests/test_wyrdforge.py",
-    "verified": "All executed_here counts in this manifest were re-measured by the E1 completion session on 2026-10-29 (node v24, g++ 13, dedicated campaign venv) and reproduced exactly.",
-    "sdk_js_build": "cd sdk/js && rm -rf dist && npm run build  (tsc CommonJS pass + scripts/build-esm.mjs: rewrites dist/*.js to .cjs and recompiles module ESNext to .mjs with specifiers rewritten; then plain-node smoke: require dist/index.cjs and import dist/index.mjs, construct WyrdClient)"
   }
 }
