@@ -132,7 +132,7 @@ def test_degradation_also_covers_include_flags_off(
 def test_healthy_store_still_populates_memory_content() -> None:
     oracle, store = _build_oracle()
     engine = WritebackEngine(store)
-    engine.process_turn(
+    engine.process_turn(speaker_id="gunnar",
         user_input="hello",
         response_text="hi",
         facts=[{"fact_subject_id": "gunnar", "fact_key": "mood",

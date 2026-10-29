@@ -366,7 +366,7 @@ def _fresh_store(bus=None) -> PersistentMemoryStore:
 def test_writeback_bus_none_old_behavior() -> None:
     store = _fresh_store()
     engine = WritebackEngine(store)
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="hello", response_text="hi",
         facts=[{"fact_subject_id": "gunnar", "fact_key": "mood", "fact_value": "calm"}],
     )
@@ -379,7 +379,7 @@ def test_writeback_written_event() -> None:
     store = _fresh_store()
     bus, rec = _wired_bus("writeback.written")
     engine = WritebackEngine(store, bus=bus)
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="hello", response_text="hi",
         facts=[{"fact_subject_id": "gunnar", "fact_key": "mood", "fact_value": "calm"}],
     )
@@ -397,7 +397,7 @@ def test_writeback_written_event_carries_key() -> None:
     store = _fresh_store()
     bus, rec = _wired_bus("writeback.written")
     engine = WritebackEngine(store, bus=bus)
-    engine.process_turn(
+    engine.process_turn(speaker_id="gunnar",
         user_input="hello", response_text="hi", idempotency_key="key-1"
     )
     assert rec.payloads("writeback.written")[0]["idempotency_key"] == "key-1"
@@ -407,10 +407,10 @@ def test_writeback_replay_event_instead_of_written() -> None:
     store = _fresh_store()
     bus, rec = _wired_bus("writeback.written", "writeback.replay")
     engine = WritebackEngine(store, bus=bus)
-    first = engine.process_turn(
+    first = engine.process_turn(speaker_id="gunnar",
         user_input="hello", response_text="hi", idempotency_key="key-9"
     )
-    second = engine.process_turn(
+    second = engine.process_turn(speaker_id="gunnar",
         user_input="hello", response_text="hi", idempotency_key="key-9"
     )
     assert [r.record_id for r in first["observations"]] == [
@@ -425,9 +425,9 @@ def test_writeback_replay_writes_no_new_records() -> None:
     store = _fresh_store()
     engine = WritebackEngine(store)
     before = store.list_by_record_type("observation")
-    engine.process_turn(user_input="a", response_text="b", idempotency_key="k")
+    engine.process_turn(speaker_id="gunnar", user_input="a", response_text="b", idempotency_key="k")
     after_first = store.list_by_record_type("observation")
-    engine.process_turn(user_input="a", response_text="b", idempotency_key="k")
+    engine.process_turn(speaker_id="gunnar", user_input="a", response_text="b", idempotency_key="k")
     after_replay = store.list_by_record_type("observation")
     assert len(after_first) == len(before) + 1
     assert len(after_replay) == len(after_first)
@@ -442,7 +442,7 @@ def _fabricate_records(store: PersistentMemoryStore):
     fabricator = WritebackEngine(
         PersistentMemoryStore(tempfile.mktemp(suffix=".db"))
     )
-    obs = fabricator.write_observation(title="t", summary="s")
+    obs = fabricator.write_observation(speaker_id="gunnar", title="t", summary="s")
     fact = fabricator.write_canonical_fact(
         fact_subject_id="gunnar", fact_key="mood", fact_value="calm"
     )

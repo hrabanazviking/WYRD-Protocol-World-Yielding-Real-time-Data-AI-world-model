@@ -72,7 +72,10 @@ class ContradictionAuditConsumer:
                 f"contradiction audit: count={count} fact_ids={fact_ids} "
                 f"seq={env.seq} issued_at={env.issued_at} topic={env.topic}"
             ),
-            observation_kind="utterance",
+            # Phase C3: this is a system-generated audit record of an
+            # engine event, not someone's words — world_event kind is
+            # its honest kind (utterance kind now requires a speaker).
+            observation_kind="world_event",
             confidence=0.9,
             tags=list(_AUDIT_TAGS),
         )
@@ -165,7 +168,11 @@ class ReplayPersistenceBridge:
         self._engine.write_observation(
             title=f"replay {env.topic} seq={env.seq}",
             summary=summary,
-            observation_kind="utterance",
+            # Phase C3: the record is the engine's own persistence of
+            # a bus event envelope (the envelope itself may carry a
+            # speaker inside its payload) — a world_event record, not
+            # an utterance by this bridge.
+            observation_kind="world_event",
             confidence=0.9,
             tags=list(self._TAGS),
         )

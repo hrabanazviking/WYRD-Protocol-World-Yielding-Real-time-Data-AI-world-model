@@ -35,6 +35,7 @@ from wyrdforge.models.memory import (
     PolicyRecord,
 )
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
+from wyrdforge.services.attribution import require_attributed_observation
 
 if TYPE_CHECKING:
     from wyrdforge.runtime.events import EventBus
@@ -113,6 +114,15 @@ class WritebackEngine:
     successful commit, so a failed turn stays retryable under the
     same key. The standalone ``write_*`` methods keep their exact
     historical behaviour (build one record, ``store.add`` it).
+
+    Phase C3 (provenance enforcement): an utterance-kind observation
+    must be attributed — an explicit ``speaker_id`` or identified
+    ``participants`` — or the write is refused with
+    ``UnattributedUtteranceError`` before anything is written (see
+    ``services/attribution.py``). The check lives in the staging
+    builder, so a refusal inside ``process_turn`` leaves zero records
+    and does not consume the idempotency key. Non-utterance kinds
+    (system/engine observations) are unaffected.
     """
 
     #: Cap on the in-memory idempotency record: bounds replay memory.
@@ -159,15 +169,24 @@ class WritebackEngine:
         summary: str,
         observation_kind: str = "utterance",
         participants: list[str] | None = None,
+        speaker_id: str | None = None,
         salience: float = 0.5,
         place_id: str | None = None,
         confidence: float = 0.6,
         tags: list[str] | None = None,
         entity_scope: dict[str, Any] | None = None,
     ) -> ObservationRecord:
-        """Build an ObservationRecord WITHOUT writing it (A3 staging)."""
+        """Build an ObservationRecord WITHOUT writing it (A3 staging).
+
+        Phase C3: an utterance-kind build with neither ``speaker_id``
+        nor identified ``participants`` raises
+        ``UnattributedUtteranceError`` here — during staging, before
+        any store write — so both the standalone writer and the
+        atomic ``process_turn`` path refuse cleanly.
+        """
         now = _now()
-        return ObservationRecord(
+        clean_speaker = speaker_id.strip() if speaker_id else None
+        record = ObservationRecord(
             record_id=_new_id("obs"),
             tenant_id=self._tenant_id,
             system_id=self._system_id,
@@ -177,6 +196,7 @@ class WritebackEngine:
                 summary=summary,
                 structured_payload=ObservationPayload(
                     observation_kind=ObservationKind(observation_kind),
+                    speaker_id=clean_speaker or None,
                     normalized_claims=[summary],
                     participants=participants or [],
                     observed_at=now,
@@ -197,9 +217,20 @@ class WritebackEngine:
             governance=Governance(),
             audit=_base_audit(),
         )
+        # Phase C3 gate: refuse an unattributed utterance at build
+        # (staging) time — nothing has been written yet on any path.
+        require_attributed_observation(record)
+        return record
 
     def write_observation(self, **kwargs: Any) -> ObservationRecord:
-        """Write a raw observation to the HUGIN store."""
+        """Write a raw observation to the HUGIN store.
+
+        Utterance-kind writes (the default kind) must be attributed:
+        pass ``speaker_id=`` or ``participants=`` or the write is
+        refused with ``UnattributedUtteranceError`` (Phase C3).
+        Non-utterance kinds are engine/system records and need no
+        speaker.
+        """
         record = self._build_observation(**kwargs)
         self._store.add(record)
         return record
@@ -378,6 +409,7 @@ class WritebackEngine:
         user_input: str,
         response_text: str,
         participants: list[str] | None = None,
+        speaker_id: str | None = None,
         place_id: str | None = None,
         facts: list[dict] | None = None,
         idempotency_key: str | None = None,
@@ -391,6 +423,15 @@ class WritebackEngine:
             user_input:    The user's message text.
             response_text: The AI's response text.
             participants:  Entity IDs present in the turn.
+            speaker_id:    Entity ID of the speaker whose words
+                           ``user_input`` carries (Phase C3). The
+                           turn's utterance is attributed when either
+                           ``speaker_id`` or ``participants`` identifies
+                           who spoke; with neither, the turn is refused
+                           (``UnattributedUtteranceError``) before any
+                           write and the idempotency key is not
+                           consumed. A replay of an already-committed
+                           key returns the cached result as before.
             place_id:      Location entity ID where this turn occurred.
             facts:         Optional list of dicts, each with:
                            {fact_subject_id, fact_key, fact_value, confidence?, domain?}
@@ -422,6 +463,7 @@ class WritebackEngine:
                 user_input=user_input,
                 response_text=response_text,
                 participants=participants,
+                speaker_id=speaker_id,
                 place_id=place_id,
                 facts=facts,
                 idempotency_key=idempotency_key,
@@ -436,6 +478,7 @@ class WritebackEngine:
         user_input: str,
         response_text: str,
         participants: list[str] | None = None,
+        speaker_id: str | None = None,
         place_id: str | None = None,
         facts: list[dict] | None = None,
         idempotency_key: str | None = None,
@@ -467,6 +510,7 @@ class WritebackEngine:
             summary=f"User: {user_input[:120]} | Response: {response_text[:120]}",
             observation_kind="utterance",
             participants=participants or [],
+            speaker_id=speaker_id,
             place_id=place_id,
             salience=0.5,
         )

@@ -81,7 +81,7 @@ def test_malformed_second_fact_leaves_no_partial_turn() -> None:
         {"fact_subject_id": "gunnar", "fact_key": "faction"},  # no fact_value
     ]
     with pytest.raises(KeyError):
-        engine.process_turn(
+        engine.process_turn(speaker_id="gunnar",
             user_input="Gunnar is a warrior of Thornholt",
             response_text="Noted",
             facts=bad_facts,
@@ -112,7 +112,7 @@ def test_store_failure_mid_commit_rolls_back_whole_turn(monkeypatch) -> None:
         PersistentMemoryStore, "_insert_on_conn", failing_insert
     )
     with pytest.raises(RuntimeError, match="mid-turn"):
-        engine.process_turn(
+        engine.process_turn(speaker_id="gunnar",
             user_input="hello", response_text="hi", facts=_FACTS
         )
     assert calls["n"] == 2  # failure really was mid-batch, not at staging
@@ -126,7 +126,7 @@ def test_add_many_mid_batch_failure_rolls_back_everything(monkeypatch) -> None:
     store, engine = _setup()
     fabricator_store, fabricator = _setup()
     records = [
-        fabricator.write_observation(title="one", summary="first"),
+        fabricator.write_observation(speaker_id="gunnar", title="one", summary="first"),
         fabricator.write_canonical_fact(
             fact_subject_id="gunnar", fact_key="role", fact_value="warrior"
         ),
@@ -157,13 +157,13 @@ def test_failed_turn_does_not_consume_idempotency_key() -> None:
     store, engine = _setup()
     bad_facts = [{"fact_subject_id": "gunnar", "fact_key": "faction"}]
     with pytest.raises(KeyError):
-        engine.process_turn(
+        engine.process_turn(speaker_id="gunnar",
             user_input="hi", response_text="hello",
             facts=bad_facts, idempotency_key="turn-retry",
         )
     assert store.count() == 0
     # Retry, corrected, under the SAME key: must actually write.
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="hi", response_text="hello",
         facts=_FACTS, idempotency_key="turn-retry",
     )
@@ -215,7 +215,7 @@ def test_add_many_matches_sequential_adds() -> None:
     """Batch commit produces the same store content as add() x N."""
     _, fabricator = _setup()
     records = [
-        fabricator.write_observation(title="t", summary="s"),
+        fabricator.write_observation(speaker_id="gunnar", title="t", summary="s"),
         fabricator.write_canonical_fact(
             fact_subject_id="gunnar", fact_key="mood", fact_value="calm"
         ),
@@ -262,7 +262,7 @@ def test_add_many_bus_events_match_add_semantics() -> None:
 
     store = PersistentMemoryStore(tempfile.mktemp(suffix=".db"), bus=bus)
     engine = WritebackEngine(store)
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="hi", response_text="hello", facts=_FACTS[:1]
     )
     obs_id = result["observations"][0].record_id
@@ -306,7 +306,7 @@ def test_add_many_failure_emits_no_bus_events(monkeypatch) -> None:
         PersistentMemoryStore, "_insert_on_conn", failing_insert
     )
     with pytest.raises(RuntimeError):
-        engine.process_turn(user_input="hi", response_text="hello", facts=_FACTS[:1])
+        engine.process_turn(speaker_id="gunnar", user_input="hi", response_text="hello", facts=_FACTS[:1])
     assert seen == []
     assert store.count() == 0
 
@@ -314,7 +314,7 @@ def test_add_many_failure_emits_no_bus_events(monkeypatch) -> None:
 def test_standalone_writers_still_write_singly() -> None:
     """write_* happy path unchanged: one record per call, via add()."""
     store, engine = _setup()
-    obs = engine.write_observation(title="Solo", summary="single write")
+    obs = engine.write_observation(speaker_id="gunnar", title="Solo", summary="single write")
     fact = engine.write_canonical_fact(
         fact_subject_id="gunnar", fact_key="status", fact_value="alive"
     )
@@ -329,11 +329,11 @@ def test_standalone_writers_still_write_singly() -> None:
 
 def test_idempotent_replay_after_atomic_commit_writes_nothing_new() -> None:
     store, engine = _setup()
-    first = engine.process_turn(
+    first = engine.process_turn(speaker_id="gunnar",
         user_input="hello", response_text="hi",
         facts=_FACTS, idempotency_key="a3-turn-1",
     )
-    second = engine.process_turn(
+    second = engine.process_turn(speaker_id="gunnar",
         user_input="hello", response_text="hi",
         facts=_FACTS, idempotency_key="a3-turn-1",
     )

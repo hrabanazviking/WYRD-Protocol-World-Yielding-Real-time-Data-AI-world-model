@@ -391,7 +391,7 @@ def test_writeback_concurrent_same_idempotency_key_writes_once(tmp_path):
     lock = threading.Lock()
 
     def call():
-        result = engine.process_turn(
+        result = engine.process_turn(speaker_id="gunnar",
             user_input="hello", response_text="hi", idempotency_key="K-1"
         )
         with lock:
@@ -413,7 +413,7 @@ def test_writeback_concurrent_distinct_turns_all_land(tmp_path):
     def make_caller(tid):
         def caller():
             for i in range(n_turns):
-                engine.process_turn(
+                engine.process_turn(speaker_id="gunnar",
                     user_input=f"u{tid}-{i}", response_text=f"r{tid}-{i}"
                 )
         return caller

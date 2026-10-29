@@ -8,8 +8,10 @@ import yaml
 
 from wyrdforge.hardening.config_validator import ConfigValidationError
 from wyrdforge.models.common import RetentionClass, WritePolicy
-from wyrdforge.models.memory import MemoryRecord
+from wyrdforge.models.memory import MemoryRecord, ObservationRecord
 from wyrdforge.persistence.memory_store import PersistentMemoryStore
+from wyrdforge.security.prompt_injection_guard import detect_prompt_injection
+from wyrdforge.services.attribution import is_attributed_observation
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "promotion": {
@@ -134,6 +136,19 @@ class MemoryPromoter:
             return False  # already at top
         if record.truth.approval_state.value == "quarantined":
             return False
+        # Phase C3 — the promotion gate is the second enforcement
+        # point for provenance: an unattributed utterance NEVER
+        # promotes, however it reached the store (written before C3,
+        # or added directly via store.add, bypassing the writeback
+        # boundary). And an observation whose text trips the
+        # prompt-injection guard never promotes either: hostile text
+        # stays quoted data at EPHEMERAL, never engine-backed fact.
+        if isinstance(record, ObservationRecord):
+            if not is_attributed_observation(record):
+                return False
+            text = f"{record.content.title} {record.content.summary}"
+            if detect_prompt_injection(text):
+                return False
         return True
 
     def promote_if_eligible(self, record_id: str) -> bool:

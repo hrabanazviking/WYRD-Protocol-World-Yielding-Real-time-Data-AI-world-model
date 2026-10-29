@@ -201,6 +201,9 @@ class NSEWyrdBridge:
         self._bridge.writeback.write_observation(
             title=f"Scene: {loc_name}",
             summary=f"The current scene is {loc_name}.",
+            # Phase C3: a scene statement is a world event, not an
+            # utterance — no speaker exists to attribute it to.
+            observation_kind="world_event",
         )
 
     def _sync_characters(self) -> None:

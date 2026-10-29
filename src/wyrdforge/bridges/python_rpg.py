@@ -235,14 +235,37 @@ class PythonRPGBridge(BifrostBridge):
         - ``"fact"`` — ``payload`` must have ``subject_id``, ``key``, ``value``,
           and optionally ``confidence`` and ``domain``.
 
+        Phase C3: the event is validated at the Bifrost boundary
+        first (``validate_event`` — fail closed on a malformed
+        envelope). An observation payload that identifies a speaker
+        (``speaker_id``) or participants is written as an attributed
+        utterance; one that does not is an engine world event and is
+        written as ``world_event`` kind — bridge traffic never
+        fabricates a speaker, and never smuggles unattributed words
+        in as an utterance.
+
         Args:
             event_type: ``"observation"`` or ``"fact"``.
             payload:    Data dict matching the event type.
         """
+        self.validate_event(event_type, payload)
         if event_type == "observation":
+            speaker = payload.get("speaker_id")
+            speaker_id = speaker if isinstance(speaker, str) and speaker.strip() else None
+            raw_participants = payload.get("participants")
+            participants = (
+                [p for p in raw_participants if isinstance(p, str) and p.strip()]
+                if isinstance(raw_participants, list)
+                else []
+            )
             self._engine.write_observation(
                 title=payload.get("title", "Engine event"),
                 summary=payload.get("summary", ""),
+                observation_kind=(
+                    "utterance" if (speaker_id or participants) else "world_event"
+                ),
+                speaker_id=speaker_id,
+                participants=participants,
             )
         elif event_type == "fact":
             self._engine.write_canonical_fact(
@@ -314,6 +337,10 @@ class PythonRPGBridge(BifrostBridge):
                     location_id=location_id,
                     persona_name=persona_id,
                     history_limit=self._config.history_limit,
+                    # Phase C3: the player's turns are attributed to
+                    # the player role — the same user_id this bridge's
+                    # CharacterContext path already uses ("player").
+                    speaker_id="player",
                 )
                 self._turn_loops[persona_id] = loop
             return loop

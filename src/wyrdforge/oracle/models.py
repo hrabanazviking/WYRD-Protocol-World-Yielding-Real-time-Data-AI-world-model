@@ -98,6 +98,12 @@ class ObservationSummary(StrictModel):
     title: str
     summary: str
     observed_at: datetime
+    # Phase C3: attribution carried into the packet so prompt
+    # rendering can present the observation as someone's words
+    # (data), never as unattributed instruction. Both defaulted —
+    # pre-C3 records and non-utterance kinds carry neither.
+    speaker_id: str | None = None
+    participants: list[str] = Field(default_factory=list)
 
 
 class WorldContextPacket(StrictModel):

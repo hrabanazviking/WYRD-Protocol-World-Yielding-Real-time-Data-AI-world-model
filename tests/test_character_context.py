@@ -55,7 +55,7 @@ def _build_stack() -> tuple[CharacterContext, PersistentMemoryStore, WritebackEn
         fact_value="völva",
         confidence=0.92,
     )
-    engine.write_observation(
+    engine.write_observation(speaker_id="gunnar",
         title="Sigrid reads the runes",
         summary="She cast the elder futhark and found omen of change.",
     )

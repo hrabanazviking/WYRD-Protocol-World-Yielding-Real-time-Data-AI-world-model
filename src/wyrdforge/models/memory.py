@@ -48,6 +48,13 @@ class ObservationKind(str, Enum):
 
 class ObservationPayload(StrictModel):
     observation_kind: ObservationKind
+    # Phase C3 (provenance enforcement): explicit speaker attribution
+    # for utterance-kind observations. None on records written before
+    # C3 and on non-utterance kinds; the writeback boundary refuses a
+    # NEW utterance with neither a speaker nor identified participants
+    # (see services/attribution.py), and the promoter never promotes
+    # an unattributed utterance however it was stored.
+    speaker_id: str | None = None
     raw_excerpt: str | None = None
     normalized_claims: list[str] = Field(default_factory=list)
     participants: list[str] = Field(default_factory=list)

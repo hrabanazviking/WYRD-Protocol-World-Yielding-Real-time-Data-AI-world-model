@@ -89,6 +89,16 @@ class TurnLoop:
         persona_name:     Character name injected into system prompt.
         persona_notes:    Extra character flavour text for system prompt.
         history_limit:    Max number of prior *turn-pairs* kept in memory.
+        speaker_id:       Phase C3 — the identity the turn's
+                          ``user_input`` is attributed to in memory.
+                          ``execute_turn``'s contract is that its input
+                          is the interlocutor's utterance, so the
+                          default is the generic role id ``"user"``;
+                          bridges that know their player pass the real
+                          id (PythonRPGBridge passes ``"player"``,
+                          matching its CharacterContext user_id), and a
+                          single turn may override via
+                          ``execute_turn(..., speaker_id=...)``.
     """
 
     def __init__(
@@ -103,6 +113,7 @@ class TurnLoop:
         persona_name: str = "",
         persona_notes: str = "",
         history_limit: int = 10,
+        speaker_id: str = "user",
         bus: "EventBus | None" = None,
     ) -> None:
         self._oracle = oracle
@@ -114,6 +125,7 @@ class TurnLoop:
         self._persona_name = persona_name
         self._persona_notes = persona_notes
         self._history_limit = history_limit
+        self._speaker_id = speaker_id
         self._prompt_builder = PromptBuilder()
         # Phase B1: one TurnLoop is shared by every request thread of
         # its persona behind the threading HTTP server, so the history
@@ -143,6 +155,7 @@ class TurnLoop:
         *,
         location_id: str | None = None,
         extra_facts: list[dict] | None = None,
+        speaker_id: str | None = None,
     ) -> TurnResult:
         """Execute one conversation turn.
 
@@ -152,6 +165,9 @@ class TurnLoop:
             extra_facts: Optional pre-parsed facts to write to MIMIR alongside
                          the observation.  Each dict must have:
                          ``{fact_subject_id, fact_key, fact_value, confidence?, domain?}``
+            speaker_id:  Per-turn override of the loop's speaker
+                         attribution (Phase C3); defaults to the
+                         loop's ``speaker_id``.
 
         Returns:
             TurnResult with response, written record IDs, and contradiction count.
@@ -239,6 +255,7 @@ class TurnLoop:
             written = self._engine.process_turn(
                 user_input=user_input,
                 response_text=response_text,
+                speaker_id=speaker_id or self._speaker_id,
                 place_id=effective_loc,
                 facts=extra_facts or [],
             )

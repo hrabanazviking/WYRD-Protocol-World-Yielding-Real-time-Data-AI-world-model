@@ -28,13 +28,13 @@ def _setup() -> tuple[PersistentMemoryStore, WritebackEngine]:
 
 def test_write_observation_returns_observation_record() -> None:
     store, engine = _setup()
-    record = engine.write_observation(title="Gunnar speaks", summary="He said hello")
+    record = engine.write_observation(speaker_id="gunnar", title="Gunnar speaks", summary="He said hello")
     assert isinstance(record, ObservationRecord)
 
 
 def test_write_observation_persists_to_store() -> None:
     store, engine = _setup()
-    record = engine.write_observation(title="Gunnar speaks", summary="He said hello")
+    record = engine.write_observation(speaker_id="gunnar", title="Gunnar speaks", summary="He said hello")
     loaded = store.get(record.record_id)
     assert loaded is not None
     assert loaded.record_id == record.record_id
@@ -42,20 +42,20 @@ def test_write_observation_persists_to_store() -> None:
 
 def test_write_observation_uses_hugin_store() -> None:
     store, engine = _setup()
-    engine.write_observation(title="Gunnar speaks", summary="He said hello")
+    engine.write_observation(speaker_id="gunnar", title="Gunnar speaks", summary="He said hello")
     hugin_records = store.all(store=StoreName.HUGIN.value)
     assert len(hugin_records) >= 1
 
 
 def test_write_observation_is_ephemeral() -> None:
     store, engine = _setup()
-    record = engine.write_observation(title="Test", summary="Test summary")
+    record = engine.write_observation(speaker_id="gunnar", title="Test", summary="Test summary")
     assert record.lifecycle.write_policy == WritePolicy.EPHEMERAL
 
 
 def test_write_observation_short_retention() -> None:
     store, engine = _setup()
-    record = engine.write_observation(title="Test", summary="Test summary")
+    record = engine.write_observation(speaker_id="gunnar", title="Test", summary="Test summary")
     assert record.lifecycle.retention_class == RetentionClass.SHORT
 
 
@@ -70,7 +70,7 @@ def test_write_observation_sets_participants() -> None:
 
 def test_write_observation_sets_place_id() -> None:
     store, engine = _setup()
-    record = engine.write_observation(
+    record = engine.write_observation(speaker_id="gunnar",
         title="Meeting", summary="At the hall", place_id="mead_hall"
     )
     assert record.content.structured_payload.place_id == "mead_hall"
@@ -78,7 +78,7 @@ def test_write_observation_sets_place_id() -> None:
 
 def test_write_observation_salience_sets_priority() -> None:
     store, engine = _setup()
-    record = engine.write_observation(title="T", summary="S", salience=0.9)
+    record = engine.write_observation(speaker_id="gunnar", title="T", summary="S", salience=0.9)
     assert record.retrieval.default_priority == 0.9
 
 
@@ -244,7 +244,7 @@ def test_write_policy_applies_to_domains() -> None:
 
 def test_process_turn_returns_dict_with_observations_and_facts() -> None:
     store, engine = _setup()
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="Gunnar walks in",
         response_text="He nods at the fire",
     )
@@ -254,7 +254,7 @@ def test_process_turn_returns_dict_with_observations_and_facts() -> None:
 
 def test_process_turn_always_creates_observation() -> None:
     store, engine = _setup()
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="Something happened",
         response_text="And something was said",
     )
@@ -264,7 +264,7 @@ def test_process_turn_always_creates_observation() -> None:
 
 def test_process_turn_no_facts_by_default() -> None:
     store, engine = _setup()
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="Hello",
         response_text="Hello back",
     )
@@ -273,7 +273,7 @@ def test_process_turn_no_facts_by_default() -> None:
 
 def test_process_turn_writes_provided_facts() -> None:
     store, engine = _setup()
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="Gunnar is a warrior",
         response_text="Noted",
         facts=[
@@ -287,7 +287,7 @@ def test_process_turn_writes_provided_facts() -> None:
 
 def test_process_turn_facts_use_provided_confidence() -> None:
     store, engine = _setup()
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="Test",
         response_text="Test",
         facts=[
@@ -304,7 +304,7 @@ def test_process_turn_facts_use_provided_confidence() -> None:
 
 def test_process_turn_persists_all_records() -> None:
     store, engine = _setup()
-    result = engine.process_turn(
+    result = engine.process_turn(speaker_id="gunnar",
         user_input="Turn text",
         response_text="Response text",
         facts=[

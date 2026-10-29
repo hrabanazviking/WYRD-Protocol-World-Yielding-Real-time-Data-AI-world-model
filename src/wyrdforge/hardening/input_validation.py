@@ -545,6 +545,8 @@ EVENT_PAYLOAD_SCHEMAS: dict[str, dict[str, tuple[str, int | None]]] = {
     "observation": {
         "title": ("str", 10_000),
         "summary": ("str", 100_000),
+        # Phase C3: optional speaker attribution for utterance events.
+        "speaker_id": ("str?", 500),
     },
     "fact": {
         "subject_id": ("str", 500),

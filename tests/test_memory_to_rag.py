@@ -85,7 +85,7 @@ def test_quarantined_facts_excluded() -> None:
 
 def test_recent_family_populated_from_observations() -> None:
     store, engine, adapter = _setup()
-    engine.write_observation(title="Gunnar enters", summary="He walked in.")
+    engine.write_observation(speaker_id="gunnar", title="Gunnar enters", summary="He walked in.")
     result = adapter.get_candidates_by_family()
     assert "recent" in result
     assert len(result["recent"]) >= 1
@@ -93,7 +93,7 @@ def test_recent_family_populated_from_observations() -> None:
 
 def test_recent_item_text_contains_summary() -> None:
     store, engine, adapter = _setup()
-    engine.write_observation(title="Test obs", summary="Something notable occurred.")
+    engine.write_observation(speaker_id="gunnar", title="Test obs", summary="Something notable occurred.")
     result = adapter.get_candidates_by_family()
     texts = [item.text for item in result.get("recent", [])]
     assert any("Something notable" in t for t in texts)
@@ -139,7 +139,7 @@ def test_record_to_item_canonical() -> None:
 
 def test_record_to_item_observation() -> None:
     store, engine, adapter = _setup()
-    r = engine.write_observation(title="Event", summary="Something happened here.")
+    r = engine.write_observation(speaker_id="gunnar", title="Event", summary="Something happened here.")
     item = adapter.record_to_item(r)
     assert item.item_type == "observation"
     assert "Something happened" in item.text

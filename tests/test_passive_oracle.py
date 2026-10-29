@@ -95,7 +95,7 @@ def _oracle_with_world_and_facts() -> tuple[PassiveOracle, World, PersistentMemo
         policy_kind="behavioral",
     )
     # Observation
-    engine.write_observation(
+    engine.write_observation(speaker_id="gunnar",
         title="Gunnar enters hall",
         summary="Gunnar walked into the great hall.",
     )
