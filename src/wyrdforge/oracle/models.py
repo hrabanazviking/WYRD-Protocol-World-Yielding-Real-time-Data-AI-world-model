@@ -180,6 +180,34 @@ class RankedObservationResult(StrictModel):
     novelty: float
 
 
+class WyrdThreadResult(StrictModel):
+    """One fate thread as the Oracle reports it (Phase D4).
+
+    The thread's own state, plus the runic foundation it rests on:
+    ``hamingja`` maps each endpoint id to its CURRENT Hamingja score
+    read live from its ``HamingjaComponent`` (None for an endpoint
+    carrying none) — reported beside the thread, never copied into
+    it, so the two layers can never disagree by staleness.
+    ``convergence_score`` is DERIVED at query time
+    (``strength * wyrd_charge``); nothing stores it.
+    """
+
+    thread_id: str
+    endpoint_ids: list[str]
+    kind: str
+    strength: float
+    wyrd_charge: float
+    convergence_score: float
+    status: str  # "woven" | "severed" | "fulfilled"
+    prophesied_event: str | None
+    description: str
+    rune_name: str | None
+    basis_event_ids: list[str]
+    hamingja: dict[str, float | None]
+    woven_at: datetime
+    closed_at: datetime | None
+
+
 class RelationResult(StrictModel):
     """Faction membership and co-presence of an entity."""
 

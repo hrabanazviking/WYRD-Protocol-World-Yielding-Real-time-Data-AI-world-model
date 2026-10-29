@@ -16,6 +16,7 @@ from wyrdforge.oracle.models import (
     SensationResult,
     ThreatResult,
     WorldContextPacket,
+    WyrdThreadResult,
 )
 
 __all__ = [
@@ -35,4 +36,5 @@ __all__ = [
     "SensationResult",
     "ThreatResult",
     "WorldContextPacket",
+    "WyrdThreadResult",
 ]

@@ -619,6 +619,44 @@ class BifrostBridge(ABC):
 
 The non-physical component layer — WYRD's most distinctive feature.
 
+> **RECONCILED 2026-10-29 (Phase D4, metaphysics reconciliation).**
+> The sketch below is the original plan; the code shipped under
+> different names and shapes, and this note is the authoritative
+> mapping so a reader can tell what the metaphysics IS:
+>
+> - `HamingjaComponent` — **shipped** in
+>   `src/wyrdforge/ecs/components/runic.py`, driven by
+>   `services/runic_engine.py`. Shipped shape differs from the
+>   sketch: one signed `score` in [-1.0, 1.0] (negative = the
+>   sketch's `curse_active`, positive = its blessing), plus `peak`,
+>   `drift_rate`, `last_event_id`. The sketch's `lineage_sources`
+>   shipped on the sibling `AncestralResonanceComponent`
+>   (`lineage_ids`, resonance `score`, `memory_fragments`).
+> - `SpiritualChargeComponent` — **shipped as
+>   `RunicChargeComponent`** in `runic.py`: a per-rune charge map
+>   in [0.0, 1.0] instead of one signed level, because runic work
+>   is always of a named rune; `total_charge()` is the aggregate.
+>   Invocations land via `RunicEngine.invoke_rune`.
+> - `RunicBindingComponent` — **not shipped**: rune invocations are
+>   recorded as charges, not as persistent binding entities.
+> - `WyrdThreadComponent` — **shipped 2026-10-29 (D4)** in
+>   `src/wyrdforge/ecs/components/metaphysical.py` (this file, the
+>   plan's own path), as a component on its own thread ENTITY
+>   (the D1 engagement/effect precedent), naming exactly two
+>   `endpoint_ids`, with `kind`, `strength`, `wyrd_charge`,
+>   `decay_rate`, `prophesied_event`, `rune_name`, basis events,
+>   and a woven → severed/fulfilled lifecycle. The mutation service
+>   is `services/thread_engine.py` (`ThreadEngine`: weave, adjust,
+>   sever, fulfill, tick decay, convergence detection); the
+>   `WyrdThreadSystem` sketch below is realised as
+>   `ThreadEngine.detect_convergences` + Oracle query
+>   `get_convergences` (derived fate pressure
+>   `strength * wyrd_charge` between co-located endpoints, never
+>   stored). Oracle thread queries (§7.3's metaphysical report,
+>   realised as structured results): `get_wyrd_threads`,
+>   `get_thread_between`, `get_convergences` — every answer carries
+>   each endpoint's live hamingja beside the thread state.
+
 **`src/wyrdforge/ecs/components/metaphysical.py`**
 
 ```python

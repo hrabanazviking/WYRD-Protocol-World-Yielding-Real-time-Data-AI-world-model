@@ -55,6 +55,18 @@ memory-recall surface a live agent's context budget needs:
                         transparent salience score (recency × bond
                         strength × novelty; see ``oracle/salience.py``)
 
+Phase D4 (metaphysics reconciliation, roadmap §3.5) adds the fate /
+thread queries over ``ecs/components/metaphysical.py``, composed on
+the shipped runic foundation (``ecs/components/runic.py``):
+    26. get_wyrd_threads    — threads involving an entity
+    27. get_thread_between  — threads connecting exactly two entities
+    28. get_convergences    — live co-located high-pressure threads
+
+Every thread answer carries each endpoint's CURRENT hamingja beside
+the thread's own state — the runic layer reported with the thread
+layer, never copied into it. Convergence is derived at query time
+(strength × wyrd_charge between co-located endpoints), never stored.
+
 Both are opt-in additions: the context packet's default observation
 fetch keeps its exact pre-D3 behaviour (global, newest-first) unless
 a caller passes ``rank_by_salience=True`` to build_context_packet.
@@ -72,7 +84,11 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import wyrdforge.ecs.components.combat  # noqa: F401  (component registration)
+import wyrdforge.ecs.components.metaphysical  # noqa: F401  (component registration)
+import wyrdforge.ecs.components.runic  # noqa: F401  (component registration)
 import wyrdforge.ecs.components.sensation  # noqa: F401  (component registration)
+from wyrdforge.ecs.components.metaphysical import WyrdThreadComponent
+from wyrdforge.ecs.components.runic import HamingjaComponent
 from wyrdforge.ecs.components.character import FactionComponent
 from wyrdforge.ecs.components.combat import (
     CombatantComponent,
@@ -126,6 +142,7 @@ from wyrdforge.oracle.models import (
     SensationResult,
     ThreatResult,
     WorldContextPacket,
+    WyrdThreadResult,
 )
 from wyrdforge.oracle.salience import (
     DEFAULT_HALF_LIFE_HOURS,
@@ -979,6 +996,123 @@ class PassiveOracle:
             key=lambda r: (-r.score, -as_utc(r.observed_at).timestamp(), r.record_id)
         )
         return results[:limit]
+
+    # ------------------------------------------------------------------
+    # Queries 26–28: wyrd threads (Phase D4, metaphysics reconciliation)
+    #
+    # All run under world.lock (B1 discipline). Threads are entities
+    # carrying WyrdThreadComponent; answers compose the thread's own
+    # state with each endpoint's LIVE hamingja (the runic foundation
+    # reported beside the thread, never copied into it). Convergence
+    # is derived here at query time — strength × wyrd_charge between
+    # co-located endpoints — and is stored nowhere. The engine-side
+    # implementation of the same read is
+    # ThreadEngine.detect_convergences; both share the component's
+    # is_convergence predicate and this module's co-location rule.
+    # ------------------------------------------------------------------
+
+    def _thread_result(self, comp: WyrdThreadComponent) -> WyrdThreadResult:
+        """Build a thread result. Caller holds ``world.lock``."""
+        hamingja: dict[str, float | None] = {}
+        for endpoint_id in comp.endpoint_ids:
+            ham = self._world.get_component(endpoint_id, "hamingja")
+            hamingja[endpoint_id] = ham.score if isinstance(ham, HamingjaComponent) else None
+        return WyrdThreadResult(
+            thread_id=comp.entity_id,
+            endpoint_ids=list(comp.endpoint_ids),
+            kind=comp.kind,
+            strength=comp.strength,
+            wyrd_charge=comp.wyrd_charge,
+            convergence_score=comp.convergence_score,
+            status=comp.status,
+            prophesied_event=comp.prophesied_event,
+            description=comp.description,
+            rune_name=comp.rune_name,
+            basis_event_ids=list(comp.basis_event_ids),
+            hamingja=hamingja,
+            woven_at=comp.woven_at,
+            closed_at=comp.closed_at,
+        )
+
+    def get_wyrd_threads(
+        self, entity_id: str, *, live_only: bool = True
+    ) -> list[WyrdThreadResult]:
+        """Fate threads involving an entity, strongest first.
+
+        Sorted by ``(-strength, thread_id)`` — total and
+        deterministic. ``live_only=False`` includes severed and
+        fulfilled threads (history); the default reports the
+        entity's live fate only. An entity woven into nothing gets
+        an empty list.
+        """
+        with self._world.lock:
+            results: list[WyrdThreadResult] = []
+            for _entity, comp in self._world.iter_components("wyrd_thread"):
+                if not isinstance(comp, WyrdThreadComponent):
+                    continue
+                if not comp.involves(entity_id):
+                    continue
+                if live_only and not comp.is_live:
+                    continue
+                results.append(self._thread_result(comp))
+            results.sort(key=lambda r: (-r.strength, r.thread_id))
+            return results
+
+    def get_thread_between(
+        self, entity_a: str, entity_b: str, *, live_only: bool = True
+    ) -> list[WyrdThreadResult]:
+        """Fate threads connecting exactly this pair, strongest first.
+
+        Direction does not matter: a thread woven (a, b) answers a
+        query for (b, a). Same ordering as :meth:`get_wyrd_threads`.
+        """
+        with self._world.lock:
+            results: list[WyrdThreadResult] = []
+            for _entity, comp in self._world.iter_components("wyrd_thread"):
+                if not isinstance(comp, WyrdThreadComponent):
+                    continue
+                if comp.other_endpoint(entity_a) != entity_b:
+                    continue
+                if live_only and not comp.is_live:
+                    continue
+                results.append(self._thread_result(comp))
+            results.sort(key=lambda r: (-r.strength, r.thread_id))
+            return results
+
+    def get_convergences(
+        self, *, threshold: float = 0.5
+    ) -> list[WyrdThreadResult]:
+        """Fate convergences: live, co-located, high-pressure threads.
+
+        A convergence is a LIVE thread whose derived fate pressure
+        (``strength * wyrd_charge``) is at or above ``threshold``
+        AND whose endpoints are co-located — they share a
+        ``SpatialComponent`` most-specific location (equal and
+        non-None; unplaced entities are never co-located). Sorted
+        by ``(-convergence_score, thread_id)``. The threshold is a
+        caller judgment, exactly like D2's freshness window: the
+        engine derives the pressure, the caller names what counts
+        as convergence. Negative thresholds raise ValueError.
+        """
+        if threshold < 0:
+            raise ValueError(f"threshold must be non-negative, got {threshold}")
+        with self._world.lock:
+            results: list[WyrdThreadResult] = []
+            for _entity, comp in self._world.iter_components("wyrd_thread"):
+                if not isinstance(comp, WyrdThreadComponent):
+                    continue
+                if not comp.is_convergence(threshold):
+                    continue
+                a = self._world.get_component(comp.endpoint_ids[0], "spatial")
+                b = self._world.get_component(comp.endpoint_ids[1], "spatial")
+                if not isinstance(a, SpatialComponent) or not isinstance(b, SpatialComponent):
+                    continue
+                loc_a = a.most_specific_id()
+                if loc_a is None or loc_a != b.most_specific_id():
+                    continue
+                results.append(self._thread_result(comp))
+            results.sort(key=lambda r: (-r.convergence_score, r.thread_id))
+            return results
 
     # ------------------------------------------------------------------
     # Query 8: search_facts
