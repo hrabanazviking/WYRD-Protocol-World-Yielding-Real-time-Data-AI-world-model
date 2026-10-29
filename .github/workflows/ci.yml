@@ -1,5 +1,9 @@
 name: CI
 
+# Manual-only, by Volmarr's standing law (2026-10-27, all repos):
+# GitHub Actions workflows fire ONLY when manually called
+# (workflow_dispatch) — never auto-triggered by pushes or PRs.
+# Phase E6 widened WHAT this workflow runs, never WHEN it fires.
 on:
   workflow_dispatch:
 
@@ -26,5 +30,94 @@ jobs:
       - name: Lint with ruff
         run: ruff check src/ tests/
 
+      # The core suite also carries the E6 docs check
+      # (tests/test_doc_policies.py: every `python -m <module>` and
+      # `wyrd-*` console script named in the user-facing docs must
+      # exist — the check that would have caught the broken
+      # quickstart). It rides this job; no separate step is needed.
       - name: Run tests
         run: pytest tests/ -v
+
+  # Phase E6 (CI widening): the satellite suites that pass locally but
+  # CI never ran — installers, the cloud relay, the GDScript logic
+  # suite, the Godot logic suite, and the pygame suite (the one
+  # integration whose shipped Python is imported by its tests).
+  # Every command below was run locally first with the same form
+  # (campaign state file, E6 section, records the measured counts).
+  satellites:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Install suite
+        run: python -m pytest install/tests -v
+
+      - name: Cloud relay suite
+        run: python -m pytest tools/wyrd_cloud_relay/tests -v
+
+      - name: GDScript logic suite (SDK)
+        run: python -m pytest sdk/gdscript/tests -v
+
+      - name: Godot logic suite
+        run: python -m pytest integrations/godot/wyrdforge/tests/test_godot_logic.py -v
+
+      - name: Pygame suite
+        env:
+          PYTHONPATH: integrations/pygame/wyrdforge
+        run: python -m pytest integrations/pygame/wyrdforge/tests/test_wyrdforge.py -v
+
+  # Phase E6: the JS SDK suite (ts-jest, imports the shipped src/)
+  # plus the E2 build, so the declared dist/ entry points are proven
+  # producible on a clean runner, not only on the forge machine.
+  sdk-js:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install JS SDK dependencies
+        working-directory: sdk/js
+        run: npm ci
+
+      - name: Run JS SDK tests
+        working-directory: sdk/js
+        run: npm test
+
+      - name: Build JS SDK dist
+        working-directory: sdk/js
+        run: npm run build
+
+  # Phase E6: the C# SDK suite (xUnit against the shipped client).
+  # This job exists because the campaign VM has no dotnet SDK, so
+  # the C# suites cannot be verified there at all — a GitHub runner
+  # is exactly where they belong. Compilation here is the first
+  # verification of the E2 NuGet packaging on a clean machine.
+  sdk-csharp:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Run C# SDK tests
+        run: dotnet test sdk/csharp/WyrdForge.Client.sln

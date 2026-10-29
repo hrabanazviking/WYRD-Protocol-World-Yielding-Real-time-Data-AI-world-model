@@ -315,3 +315,121 @@ def test_parked_corpus_notes_present():
     assert "not part of the WYRD engine" in research_note
     shared_note = _read(REPO / "docs" / "specs" / "shared" / "README.md")
     assert "not WYRD specifications" in shared_note
+
+
+# ---------------------------------------------------------------------------
+# Phase E6 — CI widening: the docs check. Every `python -m <module>`
+# invocation and every `wyrd-*` console-script name in the user-facing
+# docs must resolve to something real: the module must be importable
+# and the script must be declared in pyproject [project.scripts].
+# E5 pinned four truth docs; E6 widens the scope and pins the console
+# scripts too. This is the check that would have caught the broken
+# quickstart (`python -m wyrdforge.server` — no such module) before a
+# reader did. It rides the core pytest run (tests/), so the existing
+# CI job gets it with no extra step.
+#
+# Scope (stated deliberately): the docs a new reader copy-pastes from —
+# the quickstart and every guide beside it (docs/guides/*.md),
+# docs/index.md, docs/api/http-api.md, docs/integrations/overview.md,
+# and CLAUDE.md. Audit/research/spec corpora are out of scope: they
+# quote other projects' commands as evidence, not as instructions.
+# ---------------------------------------------------------------------------
+
+#: Every user-facing doc whose commands a reader will copy-paste.
+DOC_REFERENCE_FILES = (
+    (QUICKSTART, DOCS_INDEX, HTTP_API_DOC, CLAUDE,
+     DOCS / "integrations" / "overview.md")
+    + tuple(sorted((DOCS / "guides").glob("*.md")))
+)
+
+_PYPROJECT = REPO / "pyproject.toml"
+
+
+def _referenced_python_modules(text: str) -> set[str]:
+    """Every module named by a `python -m <module>` invocation."""
+    return set(re.findall(r"python3? -m ([a-zA-Z_][\w.]*)", text))
+
+
+def _referenced_console_scripts(text: str) -> set[str]:
+    """Every `wyrd-*` console-script-shaped name in the text."""
+    return set(re.findall(r"(?<![\w-])(wyrd-[a-z][a-z0-9-]*)\b", text))
+
+
+def _declared_console_scripts() -> set[str]:
+    """The script names declared in pyproject [project.scripts].
+
+    Parsed with a section-scoped regex rather than tomllib so the
+    check also runs on Python 3.10 (tomllib is 3.11+; CI tests 3.10).
+    """
+    text = _read(_PYPROJECT)
+    section = text.split("[project.scripts]", 1)[1].split("\n[", 1)[0]
+    return set(re.findall(r'^([a-zA-Z][\w-]*) = "', section, re.MULTILINE))
+
+
+def _validate_doc_references(modules, scripts, declared_scripts):
+    """Raise AssertionError naming every reference that does not resolve.
+
+    A module resolves when importlib can find it; a console script
+    resolves when pyproject declares it. Kept separate from the file
+    scan so the teeth test below can feed it synthetic references.
+    """
+    problems = []
+    for module in sorted(modules):
+        if importlib.util.find_spec(module) is None:
+            problems.append(f"documented module does not exist: {module}")
+    for script in sorted(scripts):
+        if script not in declared_scripts:
+            problems.append(
+                f"documented console script is not declared in "
+                f"pyproject [project.scripts]: {script}"
+            )
+    assert not problems, "; ".join(problems)
+
+
+def test_e6_scoped_docs_reference_only_existing_modules():
+    """All `python -m` modules in the E6 doc scope must be importable."""
+    named = set()
+    for doc in DOC_REFERENCE_FILES:
+        assert doc.is_file(), f"missing E6 doc-scope file: {doc}"
+        named.update(_referenced_python_modules(_read(doc)))
+    # The scan must actually see the surface it guards.
+    assert "wyrdforge.bridges.http_api" in named
+    _validate_doc_references(named, set(), _declared_console_scripts())
+
+
+def test_e6_scoped_docs_reference_only_declared_console_scripts():
+    """All `wyrd-*` script names in the E6 doc scope must be declared."""
+    named = set()
+    for doc in DOC_REFERENCE_FILES:
+        named.update(_referenced_console_scripts(_read(doc)))
+    # CLAUDE.md names the full installed set; the quickstart names two.
+    assert {"wyrd-chat", "wyrd-inspect-tui"} <= named
+    _validate_doc_references(set(), named, _declared_console_scripts())
+    # And the reverse direction for the documented set: every script
+    # the packaging declares is a real, importable target is pinned by
+    # tests/test_sdk_publishing.py; here the declared set itself must
+    # be the five E2/E4 scripts, so a silent rename fails loudly.
+    assert _declared_console_scripts() == {
+        "wyrd-chat", "wyrd-world", "wyrd-backup",
+        "wyrd-inspect", "wyrd-inspect-tui",
+    }
+
+
+def test_e6_docs_check_has_teeth():
+    """The check must FAIL on the exact shape that broke the quickstart.
+
+    - `python -m wyrdforge.server` was the E5 break: a documented
+      module that does not exist. Fed synthetically, it must raise.
+    - An invented console script (`wyrd-teleport`) must raise.
+    - The real references must pass, so the teeth are not just a
+      blanket failure.
+    """
+    declared = _declared_console_scripts()
+    with pytest.raises(AssertionError, match="wyrdforge.server"):
+        _validate_doc_references({"wyrdforge.server"}, set(), declared)
+    with pytest.raises(AssertionError, match="wyrd-teleport"):
+        _validate_doc_references(set(), {"wyrd-teleport"}, declared)
+    # Honest references pass cleanly (no exception).
+    _validate_doc_references(
+        {"wyrdforge.bridges.http_api"}, {"wyrd-chat"}, declared
+    )

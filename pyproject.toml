@@ -8,12 +8,13 @@ name = "wyrdforge"
 # the WYRD advancement phases — 1.0.0 was the frozen pre-campaign
 # version, 1.1.0 is Phase A, 1.2.0 is Phase B (completed at B5,
 # 2026-10-29), 1.3.0 is Phase C (completed at C4, 2026-10-29),
-# 1.4.0 is Phase D (completed at D6, 2026-10-29). Bump
+# 1.4.0 is Phase D (completed at D6, 2026-10-29),
+# 1.5.0 is Phase E (completed at E6, 2026-10-29). Bump
 # the minor per completed phase (patch
 # for fixes within a phase); keep src/wyrdforge/__init__.__version__
 # in step. Store schema versions (PRAGMA user_version) are separate
 # and versioned per store.
-version = "1.4.0"
+version = "1.5.0"
 description = "WYRD Protocol — World-Yielding Real-time Data AI World Model"
 readme = "README.md"
 license = { text = "CC BY 4.0" }

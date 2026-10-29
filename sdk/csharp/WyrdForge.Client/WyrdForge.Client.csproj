@@ -23,8 +23,8 @@
 
     <!-- NuGet packaging -->
     <PackageId>WyrdForge.Client</PackageId>
-    <!-- Tracks the WYRD package version (pyproject.toml): Phase D = 1.4.0. -->
-    <Version>1.4.0</Version>
+    <!-- Tracks the WYRD package version (pyproject.toml): Phase E = 1.5.0. -->
+    <Version>1.5.0</Version>
     <Authors>Volmarr Wyrd</Authors>
     <Description>C# client SDK for the WYRD Protocol HTTP API (WyrdHTTPServer). Async query/event/world client with bearer-token auth and the /v1 API surface.</Description>
     <PackageLicenseExpression>CC-BY-4.0</PackageLicenseExpression>
