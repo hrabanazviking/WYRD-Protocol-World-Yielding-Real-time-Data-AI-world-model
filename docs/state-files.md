@@ -116,6 +116,29 @@ statuses were added.
   announce rule.
 - **Quarantine:** n/a — plain text; nothing to preserve.
 
+## Backup & restore (Phase A5)
+
+- **Module:** `wyrdforge.persistence.backup` (CLI:
+  `python -m wyrdforge.persistence.backup {backup|restore|verify}`).
+- **Bundle:** one directory holding SQLite backup-API copies of all
+  three stores (`world.db` / `memory.db` / `bond.db`, no `-wal`/`-shm`
+  companions) plus `manifest.json` — per store: schema version
+  (`PRAGMA user_version`), SHA-256, byte size, and `integrity_check`
+  result, written via `atomic_write_json`.
+- **Quiesce discipline:** a bundle is consistent because the caller
+  stops the turn pipeline (no turn in flight, no store writes) for
+  the duration of the backup; each store is then WAL-checkpointed (a
+  busy checkpoint aborts the backup) and copied in fixed
+  world → memory → bond order. Without the quiesce each copy is still
+  per-store consistent, but the three may straddle a turn.
+- **Restore:** the manifest, every file's size + SHA-256, its
+  `integrity_check`, and its schema version (never newer than this
+  code knows) are all verified *before* anything is placed — a
+  tampered or corrupt bundle leaves live state untouched. Verified
+  files are staged beside their targets, re-verified, then placed;
+  a pre-existing target is first moved to
+  `<dir>/quarantine/pre-restore-<stamp>-<name>`, never deleted.
+
 ## The atomic-write rule
 
 - **SQLite + WAL** is the mechanism for the three stores — atomicity is
