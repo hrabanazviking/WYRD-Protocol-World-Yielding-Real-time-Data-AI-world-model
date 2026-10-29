@@ -100,6 +100,18 @@ class WritebackEngine:
     ``IDEMPOTENCY_RECORD_CAP`` entries, oldest evicted first).  A repeat
     call with the same key returns the cached result — identical record ids
     — without writing new records to the stores.
+
+    Phase A3 (turn-atomic writeback): process_turn stages the whole
+    turn first — it builds the observation and every fact record
+    WITHOUT writing anything — then commits them through a single
+    ``store.add_many(...)`` call, i.e. one memory-store transaction.
+    A failure while building (e.g. a malformed fact dict) happens
+    before any write; a failure inside the commit rolls the whole
+    batch back. Either way no fractured, partially-committed turn
+    can survive. The idempotency record is only populated after a
+    successful commit, so a failed turn stays retryable under the
+    same key. The standalone ``write_*`` methods keep their exact
+    historical behaviour (build one record, ``store.add`` it).
     """
 
     #: Cap on the in-memory idempotency record: bounds replay memory.
@@ -128,7 +140,7 @@ class WritebackEngine:
     # Observation (HUGIN)
     # ------------------------------------------------------------------
 
-    def write_observation(
+    def _build_observation(
         self,
         *,
         title: str,
@@ -141,9 +153,9 @@ class WritebackEngine:
         tags: list[str] | None = None,
         entity_scope: dict[str, Any] | None = None,
     ) -> ObservationRecord:
-        """Write a raw observation to the HUGIN store."""
+        """Build an ObservationRecord WITHOUT writing it (A3 staging)."""
         now = _now()
-        record = ObservationRecord(
+        return ObservationRecord(
             record_id=_new_id("obs"),
             tenant_id=self._tenant_id,
             system_id=self._system_id,
@@ -173,6 +185,10 @@ class WritebackEngine:
             governance=Governance(),
             audit=_base_audit(),
         )
+
+    def write_observation(self, **kwargs: Any) -> ObservationRecord:
+        """Write a raw observation to the HUGIN store."""
+        record = self._build_observation(**kwargs)
         self._store.add(record)
         return record
 
@@ -180,7 +196,7 @@ class WritebackEngine:
     # Episode Summary (MUNIN)
     # ------------------------------------------------------------------
 
-    def write_episode_summary(
+    def _build_episode_summary(
         self,
         *,
         title: str,
@@ -193,9 +209,9 @@ class WritebackEngine:
         confidence: float = 0.7,
         tags: list[str] | None = None,
     ) -> EpisodeSummaryRecord:
-        """Write a distilled episode summary to the MUNIN store."""
+        """Build an EpisodeSummaryRecord WITHOUT writing it (A3 staging)."""
         eid = episode_id or _new_id("ep")
-        record = EpisodeSummaryRecord(
+        return EpisodeSummaryRecord(
             record_id=_new_id("epsum"),
             tenant_id=self._tenant_id,
             system_id=self._system_id,
@@ -225,6 +241,10 @@ class WritebackEngine:
             governance=Governance(),
             audit=_base_audit(),
         )
+
+    def write_episode_summary(self, **kwargs) -> EpisodeSummaryRecord:
+        """Write a distilled episode summary to the MUNIN store."""
+        record = self._build_episode_summary(**kwargs)
         self._store.add(record)
         return record
 
@@ -232,7 +252,7 @@ class WritebackEngine:
     # Canonical Fact (MIMIR)
     # ------------------------------------------------------------------
 
-    def write_canonical_fact(
+    def _build_canonical_fact(
         self,
         *,
         fact_subject_id: str,
@@ -243,9 +263,9 @@ class WritebackEngine:
         tags: list[str] | None = None,
         value_type: str = "string",
     ) -> CanonicalFactRecord:
-        """Write a canonical world/character fact to the MIMIR store."""
+        """Build a CanonicalFactRecord WITHOUT writing it (A3 staging)."""
         title = f"{fact_subject_id}.{fact_key} = {fact_value}"
-        record = CanonicalFactRecord(
+        return CanonicalFactRecord(
             record_id=_new_id("fact"),
             tenant_id=self._tenant_id,
             system_id=self._system_id,
@@ -276,6 +296,10 @@ class WritebackEngine:
             governance=Governance(),
             audit=_base_audit(),
         )
+
+    def write_canonical_fact(self, **kwargs) -> CanonicalFactRecord:
+        """Write a canonical world/character fact to the MIMIR store."""
+        record = self._build_canonical_fact(**kwargs)
         self._store.add(record)
         return record
 
@@ -283,7 +307,7 @@ class WritebackEngine:
     # Policy (ORLOG)
     # ------------------------------------------------------------------
 
-    def write_policy(
+    def _build_policy(
         self,
         *,
         title: str,
@@ -293,8 +317,8 @@ class WritebackEngine:
         priority: int = 100,
         confidence: float = 0.95,
     ) -> PolicyRecord:
-        """Write a behavioral policy to the ORLOG store."""
-        record = PolicyRecord(
+        """Build a PolicyRecord WITHOUT writing it (A3 staging)."""
+        return PolicyRecord(
             record_id=_new_id("pol"),
             tenant_id=self._tenant_id,
             system_id=self._system_id,
@@ -325,6 +349,10 @@ class WritebackEngine:
             ),
             audit=_base_audit(),
         )
+
+    def write_policy(self, **kwargs) -> PolicyRecord:
+        """Write a behavioral policy to the ORLOG store."""
+        record = self._build_policy(**kwargs)
         self._store.add(record)
         return record
 
@@ -363,6 +391,13 @@ class WritebackEngine:
 
         Returns:
             dict with 'observations' and 'facts' lists of written records.
+
+        Atomicity (Phase A3): the turn is staged (all records built,
+        nothing written) and then committed in ONE store transaction
+        via ``store.add_many``. Any failure — a malformed fact dict
+        during staging, or a store error during commit — leaves NO
+        part of the turn in the store, and the idempotency key is
+        not consumed, so the caller may retry the same turn.
         """
         if idempotency_key is not None and idempotency_key in self._idempotency:
             cached = self._idempotency[idempotency_key]
@@ -378,7 +413,10 @@ class WritebackEngine:
                 "facts": list(cached["facts"]),
             }
 
-        obs = self.write_observation(
+        # --- Stage (A3): build every record, write NOTHING yet. ---
+        # A malformed fact dict raises here, before any store write,
+        # where the pre-A3 code had already committed the observation.
+        obs = self._build_observation(
             title=f"Turn: {user_input[:80]}",
             summary=f"User: {user_input[:120]} | Response: {response_text[:120]}",
             observation_kind="utterance",
@@ -389,7 +427,7 @@ class WritebackEngine:
 
         written_facts: list[CanonicalFactRecord] = []
         for fact_def in (facts or []):
-            fact_record = self.write_canonical_fact(
+            fact_record = self._build_canonical_fact(
                 fact_subject_id=fact_def["fact_subject_id"],
                 fact_key=fact_def["fact_key"],
                 fact_value=fact_def["fact_value"],
@@ -397,6 +435,9 @@ class WritebackEngine:
                 domain=fact_def.get("domain", "general"),
             )
             written_facts.append(fact_record)
+
+        # --- Commit (A3): one transaction for the whole turn. ---
+        self._commit_turn_records([obs, *written_facts])
 
         result: dict[str, list] = {"observations": [obs], "facts": written_facts}
 
@@ -421,6 +462,39 @@ class WritebackEngine:
         )
 
         return result
+
+    # ------------------------------------------------------------------
+    # Turn commit (Phase A3)
+    # ------------------------------------------------------------------
+
+    def _commit_turn_records(self, records: list) -> None:
+        """Commit one turn's staged records atomically.
+
+        Primary path: the memory store's ``add_many`` — a single
+        SQLite transaction, so a mid-batch failure rolls back every
+        record of the turn. Fallback for store-like objects without
+        ``add_many`` (test doubles / foreign stores): sequential
+        ``add`` with a best-effort compensating delete of whatever
+        already landed if a later add raises, then re-raise — the
+        no-partial-turn invariant is preserved on that path too,
+        as long as the store honours ``delete``.
+        """
+        add_many = getattr(self._store, "add_many", None)
+        if callable(add_many):
+            add_many(records)
+            return
+        written: list = []
+        try:
+            for record in records:
+                self._store.add(record)
+                written.append(record)
+        except Exception:
+            for record in written:
+                try:
+                    self._store.delete(record.record_id)
+                except Exception:
+                    pass  # best effort; the original error propagates
+            raise
 
     # ------------------------------------------------------------------
     # Bus wiring helper

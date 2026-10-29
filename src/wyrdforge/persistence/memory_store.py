@@ -299,6 +299,59 @@ class PersistentMemoryStore:
     # Write operations
     # ------------------------------------------------------------------
 
+    def _insert_on_conn(
+        self, record: MemoryRecord, conn: sqlite3.Connection
+    ) -> bool:
+        """Insert/replace *record* on an already-open connection.
+
+        Performs no commit/rollback of its own — the caller owns the
+        transaction. Returns True for a TRUE insert (no prior row with
+        this ``record_id``), matching :meth:`add`'s bus-emission rule.
+        """
+        payload = json.loads(record.model_dump_json())
+        expires_at = record.lifecycle.expires_at.isoformat() if record.lifecycle.expires_at else None
+        # REAL-insert detection: the INSERT below is OR REPLACE, so a
+        # pre-existing row with the same record_id is a replace, not a
+        # new insert — those must not emit.
+        is_new = conn.execute(
+            "SELECT 1 FROM memory_records WHERE record_id=?",
+            (record.record_id,),
+        ).fetchone() is None
+        conn.execute(
+            "INSERT OR REPLACE INTO memory_records "
+            "(record_id, store, record_type, tenant_id, system_id, "
+            " approval_state, write_policy, confidence, access_count, "
+            " expires_at, created_at, updated_at, data_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                record.record_id,
+                record.store.value,
+                record.record_type,
+                record.tenant_id,
+                record.system_id,
+                record.truth.approval_state.value,
+                record.lifecycle.write_policy.value,
+                record.truth.confidence,
+                record.lifecycle.access_count,
+                expires_at,
+                record.audit.created_at.isoformat(),
+                record.audit.updated_at.isoformat(),
+                json.dumps(payload),
+            ),
+        )
+        # Sync FTS
+        conn.execute("DELETE FROM memory_fts WHERE record_id=?", (record.record_id,))
+        conn.execute(
+            "INSERT INTO memory_fts (record_id, title, summary, lexical_terms) VALUES (?,?,?,?)",
+            (
+                record.record_id,
+                record.content.title,
+                record.content.summary,
+                " ".join(record.retrieval.lexical_terms),
+            ),
+        )
+        return is_new
+
     def add(self, record: MemoryRecord) -> None:
         """Insert or replace a memory record.
 
@@ -308,53 +361,36 @@ class PersistentMemoryStore:
         Re-adds of an existing record_id (e.g. ``resolve()`` re-writes) and
         reads emit nothing.  Bus errors never break the write.
         """
-        payload = json.loads(record.model_dump_json())
-        expires_at = record.lifecycle.expires_at.isoformat() if record.lifecycle.expires_at else None
-
         with self._connect() as conn:
-            # REAL-insert detection: the INSERT below is OR REPLACE, so a
-            # pre-existing row with the same record_id is a replace, not a
-            # new insert — those must not emit.
-            is_new = conn.execute(
-                "SELECT 1 FROM memory_records WHERE record_id=?",
-                (record.record_id,),
-            ).fetchone() is None
-            conn.execute(
-                "INSERT OR REPLACE INTO memory_records "
-                "(record_id, store, record_type, tenant_id, system_id, "
-                " approval_state, write_policy, confidence, access_count, "
-                " expires_at, created_at, updated_at, data_json) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    record.record_id,
-                    record.store.value,
-                    record.record_type,
-                    record.tenant_id,
-                    record.system_id,
-                    record.truth.approval_state.value,
-                    record.lifecycle.write_policy.value,
-                    record.truth.confidence,
-                    record.lifecycle.access_count,
-                    expires_at,
-                    record.audit.created_at.isoformat(),
-                    record.audit.updated_at.isoformat(),
-                    json.dumps(payload),
-                ),
-            )
-            # Sync FTS
-            conn.execute("DELETE FROM memory_fts WHERE record_id=?", (record.record_id,))
-            conn.execute(
-                "INSERT INTO memory_fts (record_id, title, summary, lexical_terms) VALUES (?,?,?,?)",
-                (
-                    record.record_id,
-                    record.content.title,
-                    record.content.summary,
-                    " ".join(record.retrieval.lexical_terms),
-                ),
-            )
+            is_new = self._insert_on_conn(record, conn)
 
         if is_new:
             self._emit_insert(record)
+
+    def add_many(self, records: Iterable[MemoryRecord]) -> None:
+        """Insert/replace *records* as ONE transaction (Phase A3).
+
+        Either every record in the batch lands or none does: all
+        inserts run on this thread's connection inside a single
+        ``with`` block, so any failure (serialization, SQL, FTS)
+        rolls the whole batch back and propagates. This is the
+        primitive that makes a turn's writeback atomic — see
+        ``WritebackEngine.process_turn``.
+
+        Bus emission matches :meth:`add` exactly: after the batch
+        commits, one event per TRUE insert of an observation/fact,
+        in batch order; replaces emit nothing.
+        """
+        batch = list(records)
+        if not batch:
+            return
+        with self._connect() as conn:
+            inserted = [
+                (record, self._insert_on_conn(record, conn)) for record in batch
+            ]
+        for record, is_new in inserted:
+            if is_new:
+                self._emit_insert(record)
 
     def _emit_insert(self, record: MemoryRecord) -> None:
         """Emit a memory.* event for a true insert; swallow bus errors."""
