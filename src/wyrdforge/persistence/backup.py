@@ -119,7 +119,14 @@ BACKUP_FORMAT = "wyrd-backup/1"
 
 MANIFEST_NAME = "manifest.json"
 
-#: The three stores, in fixed backup order.
+#: The three stores, in fixed backup order. Phase B4 note: the
+#: optional event journal (``persistence/event_journal.py``) is
+#: deliberately NOT a fourth bundle member — it is an opt-in
+#: auxiliary log, not one of the three truth stores, and this set
+#: stays exactly three (decision recorded in the journal module's
+#: docstring). A deployment that enables journaling and wants it
+#: backed up copies the single journal file separately, under the
+#: same quiesce discipline.
 STORE_NAMES: tuple[str, ...] = ("world", "memory", "bond")
 
 #: Conventional bundle / state-dir filename per store.

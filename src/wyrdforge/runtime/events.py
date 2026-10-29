@@ -129,9 +129,18 @@ def _validate_schema(schema: type | None) -> None:
 class EventBus:
     """Synchronous, thread-safe in-process event bus (see module docstring)."""
 
-    def __init__(self, dead_letter_cap: int = 256) -> None:
+    def __init__(self, dead_letter_cap: int = 256, journal=None) -> None:
         if dead_letter_cap < 0:
             raise ValueError("dead_letter_cap must be >= 0")
+        # Phase B4 — optional durable journal (additive, off by
+        # default). ``journal`` is an EventJournal or None; see
+        # attach_journal() for the flushing discipline.
+        self._journal = journal
+        self._journal_pending: list = []
+        self._journal_pending_dead: list = []
+        self._journal_publish_depth = 0
+        self._journaled_count = 0
+        self._journal_errors = 0
         self._lock = threading.RLock()
         self._schemas: dict[str, type | None] = {}
         self._buffers: dict[str, deque | None] = {}
@@ -214,6 +223,10 @@ class EventBus:
             self._failures.append(entry)
             if not self._drop_on_zero_cap:
                 self._dead_letters.append(dict(entry))
+            # Phase B4: queue a durable copy for the journal flush
+            # (bookkeeping only — no I/O under the bus lock).
+            if self._journal is not None:
+                self._journal_pending_dead.append(dict(entry))
             metrics = self._metrics.get(envelope.topic)
             if metrics is not None:
                 metrics["failed"] += 1
@@ -333,6 +346,10 @@ class EventBus:
                         replayed = list(buf)
         for envelope in replayed:
             self._deliver(fn, envelope)
+        # Phase B4: replay delivery runs outside the bus lock; flush
+        # any dead letters it produced to the journal now.
+        if self._journal_publish_depth == 0:
+            self._flush_journal()
         return token
 
     def unsubscribe(self, token: str) -> None:
@@ -415,10 +432,20 @@ class EventBus:
         self._ensure_open()
         if self._is_wildcard(topic):
             raise KeyError(f"cannot publish to wildcard pattern: {topic!r}")
-        with self._lock:
-            if topic not in self._schemas:
-                raise KeyError(f"Unknown topic: {topic!r}")
-            return self._publish_locked(topic, payload, source, turn_id)
+        # Phase B4: only the OUTERMOST publish on this thread flushes
+        # the journal, and only after the bus lock is released — a
+        # re-entrant publish from a subscriber just queues its
+        # envelope for the outer call's flush.
+        self._journal_publish_depth += 1
+        try:
+            with self._lock:
+                if topic not in self._schemas:
+                    raise KeyError(f"Unknown topic: {topic!r}")
+                return self._publish_locked(topic, payload, source, turn_id)
+        finally:
+            self._journal_publish_depth -= 1
+            if self._journal_publish_depth == 0:
+                self._flush_journal()
 
     def _publish_locked(
         self,
@@ -445,6 +472,10 @@ class EventBus:
         buf = self._buffers[topic]
         if buf is not None:
             buf.append(envelope)
+        # Phase B4: queue for the durable journal (bookkeeping only;
+        # the write happens in _flush_journal after the lock drops).
+        if self._journal is not None:
+            self._journal_pending.append(envelope)
         # Snapshot in subscription order: exact first, then wildcards.
         # Prefixes were precomputed at subscribe() (dusk slice 5).
         targets: list[Subscriber] = [fn for _, fn in self._subs[topic]]
@@ -502,6 +533,22 @@ class EventBus:
         Returns the total number of *successful* deliveries.
         """
         self._ensure_open()
+        # Phase B4: journal flush discipline as in publish().
+        self._journal_publish_depth += 1
+        try:
+            return self._publish_many_locked(items, source=source, turn_id=turn_id)
+        finally:
+            self._journal_publish_depth -= 1
+            if self._journal_publish_depth == 0:
+                self._flush_journal()
+
+    def _publish_many_locked(
+        self,
+        items: Iterable[tuple[str, dict[str, Any]]],
+        *,
+        source: str = "",
+        turn_id: str | None = None,
+    ) -> int:
         with self._lock:
             total = 0
             # topic -> (metrics, buffer, targets, sub_version)
@@ -541,6 +588,8 @@ class EventBus:
                 metrics["published"] += 1
                 if buf is not None:
                     buf.append(envelope)
+                if self._journal is not None:
+                    self._journal_pending.append(envelope)
                 self._active_topics.add(topic)
                 self._delivery_depth += 1
                 try:
@@ -628,6 +677,106 @@ class EventBus:
                 rec["delivered"] = 0
                 rec["failed"] = 0
 
+    # -- Phase B4 — durable journal (opt-in) --------------------------------
+
+    def attach_journal(self, journal) -> None:
+        """Attach a durable :class:`EventJournal` (Phase B4).
+
+        Opt-in and additive: with no journal attached the bus behaves
+        exactly as before B4. While attached, every published envelope
+        and every dead letter is ALSO persisted to the journal — the
+        in-memory replay buffers and dead-letter queue are unchanged.
+
+        Flushing discipline: publishes only QUEUE envelopes/dead
+        letters under the bus lock (no I/O); the actual journal writes
+        run in :meth:`_flush_journal` after the outermost publish
+        returns and the lock is released, so journaling can never
+        deadlock against a re-entering subscriber and a slow disk
+        never blocks delivery. A journal write failure is logged,
+        counted (see :meth:`journal_status`), and never raised into a
+        publisher.
+        """
+        with self._lock:
+            previous = self._journal
+            self._journal = journal
+        if previous is not None and previous is not journal:
+            self._flush_journal_to(previous)
+
+    def detach_journal(self):
+        """Flush pending entries and detach; returns the journal."""
+        with self._lock:
+            journal = self._journal
+            self._journal = None
+        if journal is not None:
+            self._flush_journal_to(journal)
+        return journal
+
+    @property
+    def journal(self):
+        """The attached EventJournal, or None (journaling off)."""
+        return self._journal
+
+    def journal_status(self) -> dict[str, Any]:
+        """Journaling state: attached flag + counted degradation.
+
+        ``journaled`` counts envelopes + dead letters successfully
+        persisted by this bus; ``errors`` counts failed journal
+        writes (each logged at warning; delivery was unaffected);
+        ``pending`` counts queued-but-unflushed items (nonzero only
+        mid-publish).
+        """
+        return {
+            "attached": self._journal is not None,
+            "journaled": self._journaled_count,
+            "errors": self._journal_errors,
+            "pending": len(self._journal_pending)
+            + len(self._journal_pending_dead),
+        }
+
+    def _flush_journal(self) -> None:
+        journal = self._journal
+        if journal is not None:
+            self._flush_journal_to(journal)
+
+    def _flush_journal_to(self, journal) -> None:
+        """Write queued envelopes/dead letters to *journal*; never raise.
+
+        Called only when no publish is in progress on this thread
+        (publish depth 0) and outside the bus lock acquisition of the
+        publish that queued the items.
+        """
+        with self._lock:
+            pending, self._journal_pending = self._journal_pending, []
+            pending_dead, self._journal_pending_dead = (
+                self._journal_pending_dead,
+                [],
+            )
+        for envelope in pending:
+            try:
+                journal.append(envelope)
+                self._journaled_count += 1
+            except Exception:
+                self._journal_errors += 1
+                log.warning(
+                    "EventBus journal append failed for topic %r (seq=%s); "
+                    "delivery unaffected, failure counted",
+                    getattr(envelope, "topic", "?"),
+                    getattr(envelope, "seq", "?"),
+                    exc_info=True,
+                )
+        for entry in pending_dead:
+            try:
+                journal.record_dead_letter(entry)
+                self._journaled_count += 1
+            except Exception:
+                self._journal_errors += 1
+                log.warning(
+                    "EventBus journal dead-letter persist failed for "
+                    "topic %r; in-memory dead letter retained",
+                    entry.get("topic", "?"),
+                    exc_info=True,
+                )
+
     # -- slice 10 — shutdown --------------------------------------------------
 
     def close(self) -> None:
@@ -635,6 +784,11 @@ class EventBus:
 
         Idempotent — calling twice is fine.
         """
+        # Phase B4: persist anything still queued BEFORE the
+        # in-memory queues are cleared below — a close (or restart)
+        # must not erase journal or dead-letter evidence.
+        if self._journal_publish_depth == 0:
+            self._flush_journal()
         with self._lock:
             if self._closed:
                 return
