@@ -20,6 +20,7 @@ Typical usage::
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -119,8 +120,13 @@ class PythonRPGBridge(BifrostBridge):
             rag_packet_budget=self._config.rag_budget,
         )
 
-        # Per-persona TurnLoops lazily created on first query
+        # Per-persona TurnLoops lazily created on first query.
+        # Phase B1: behind the threading HTTP server, request threads
+        # share this bridge — the lazy check-then-create on this dict
+        # is guarded so two concurrent first queries for one persona
+        # cannot build two loops and split the persona's history.
         self._turn_loops: dict[str, TurnLoop] = {}
+        self._turn_loops_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Factory
@@ -253,8 +259,10 @@ class PythonRPGBridge(BifrostBridge):
         Args:
             persona_id: Persona whose history to clear.
         """
-        if persona_id in self._turn_loops:
-            self._turn_loops[persona_id].clear_history()
+        with self._turn_loops_lock:
+            loop = self._turn_loops.get(persona_id)
+        if loop is not None:
+            loop.clear_history()
 
     def teardown(self) -> None:
         """No persistent resources to release."""
@@ -293,16 +301,19 @@ class PythonRPGBridge(BifrostBridge):
     # ------------------------------------------------------------------
 
     def _get_or_create_loop(self, persona_id: str, location_id: str | None) -> TurnLoop:
-        if persona_id not in self._turn_loops:
-            assert self._connector is not None
-            self._turn_loops[persona_id] = TurnLoop(
-                self._oracle,
-                self._engine,
-                self._detector,
-                self._connector,
-                focus_entity_id=persona_id,
-                location_id=location_id,
-                persona_name=persona_id,
-                history_limit=self._config.history_limit,
-            )
-        return self._turn_loops[persona_id]
+        with self._turn_loops_lock:
+            loop = self._turn_loops.get(persona_id)
+            if loop is None:
+                assert self._connector is not None
+                loop = TurnLoop(
+                    self._oracle,
+                    self._engine,
+                    self._detector,
+                    self._connector,
+                    focus_entity_id=persona_id,
+                    location_id=location_id,
+                    persona_name=persona_id,
+                    history_limit=self._config.history_limit,
+                )
+                self._turn_loops[persona_id] = loop
+            return loop

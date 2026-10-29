@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -128,6 +129,17 @@ class WritebackEngine:
         self._store = store
         self._tenant_id = default_tenant_id
         self._system_id = default_system_id
+        # Phase B1: the idempotency check → commit → record sequence in
+        # process_turn is a check-then-act on this map; behind the
+        # threading HTTP server one engine serves every request thread,
+        # and two concurrent calls carrying the same key could both
+        # miss the map and both write the turn (reproduced pre-B1: 8
+        # concurrent same-key callers produced 2 distinct writes).
+        # _lock serialises process_turn so the sequence is atomic.
+        # The standalone write_* methods take no lock: they touch no
+        # engine state, and the memory store is already thread-safe
+        # (per-thread connections).
+        self._lock = threading.RLock()
         # idempotency_key -> {"observations": [...], "facts": [...]} (record lists)
         self._idempotency: OrderedDict[str, dict[str, list]] = OrderedDict()
         # Opt-in inner-communications wiring: bus=None preserves the exact
@@ -398,20 +410,54 @@ class WritebackEngine:
         during staging, or a store error during commit — leaves NO
         part of the turn in the store, and the idempotency key is
         not consumed, so the caller may retry the same turn.
+
+        Thread-safety (Phase B1): the whole call runs under the
+        engine lock (see ``__init__``), so the idempotency
+        check → commit → record sequence cannot interleave with
+        another thread's. Bus events are emitted after the lock is
+        released, never inside it.
         """
+        with self._lock:
+            result, pending_emits = self._process_turn_locked(
+                user_input=user_input,
+                response_text=response_text,
+                participants=participants,
+                place_id=place_id,
+                facts=facts,
+                idempotency_key=idempotency_key,
+            )
+        for topic, payload in pending_emits:
+            self._emit(topic, payload)
+        return result
+
+    def _process_turn_locked(
+        self,
+        *,
+        user_input: str,
+        response_text: str,
+        participants: list[str] | None = None,
+        place_id: str | None = None,
+        facts: list[dict] | None = None,
+        idempotency_key: str | None = None,
+    ) -> tuple[dict[str, list], list[tuple[str, dict]]]:
+        """Body of process_turn; caller holds ``self._lock``.
+
+        Returns the result dict plus the bus emissions to publish
+        after the lock is released.
+        """
+        pending_emits: list[tuple[str, dict]] = []
         if idempotency_key is not None and idempotency_key in self._idempotency:
             cached = self._idempotency[idempotency_key]
             # Refresh recency, then return copies so callers cannot mutate
             # the cached record lists.
             self._idempotency.move_to_end(idempotency_key)
-            self._emit(
-                "writeback.replay",
-                {"idempotency_key": idempotency_key},
+            pending_emits.append(
+                ("writeback.replay", {"idempotency_key": idempotency_key})
             )
             return {
                 "observations": list(cached["observations"]),
                 "facts": list(cached["facts"]),
-            }
+            }, pending_emits
 
         # --- Stage (A3): build every record, write NOTHING yet. ---
         # A malformed fact dict raises here, before any store write,
@@ -450,18 +496,20 @@ class WritebackEngine:
             while len(self._idempotency) > self.IDEMPOTENCY_RECORD_CAP:
                 self._idempotency.popitem(last=False)
 
-        self._emit(
-            "writeback.written",
-            {
-                "record_ids": {
-                    "observations": [r.record_id for r in result["observations"]],
-                    "facts": [r.record_id for r in result["facts"]],
+        pending_emits.append(
+            (
+                "writeback.written",
+                {
+                    "record_ids": {
+                        "observations": [r.record_id for r in result["observations"]],
+                        "facts": [r.record_id for r in result["facts"]],
+                    },
+                    "idempotency_key": idempotency_key,
                 },
-                "idempotency_key": idempotency_key,
-            },
+            )
         )
 
-        return result
+        return result, pending_emits
 
     # ------------------------------------------------------------------
     # Turn commit (Phase A3)

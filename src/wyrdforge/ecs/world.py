@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Iterator
@@ -34,6 +35,39 @@ class World:
     Holds all entities and their components. Maintains indexes so that
     queries by tag or component type are O(1) set lookups rather than
     full scans.
+
+    Thread-safety discipline (Phase B1):
+
+    * One re-entrant lock — :attr:`lock` — guards ALL registry state:
+      the entity dict, the component dict, and both indexes. Every
+      public method in this class performs its state access while
+      holding that lock, so a mutation (or a multi-step query) is
+      atomic with respect to other threads.
+    * The lock is an ``RLock`` (the EventBus's house pattern,
+      ``runtime/events.py``) because compound operations nest: e.g.
+      ``YggdrasilTree`` holds the world lock across a whole placement
+      while calling back into ``World`` methods, and the Oracle holds
+      it across a whole query while calling helpers.
+    * Bus events are published AFTER the mutating method's own
+      critical section, never inside it: state first, announce after.
+      (A caller that itself holds ``world.lock`` across a compound
+      operation — YggdrasilTree does — will therefore see nested World
+      emits published under its own hold. That is the same posture as
+      the bus itself, which delivers synchronously under its lock with
+      re-entrant subscribers as a documented pattern; a bus subscriber
+      must never block waiting on another thread's world access.)
+    * Lock ordering: the world lock is the only ECS lock. Code that
+      needs consistency across several World calls (YggdrasilTree,
+      PassiveOracle, WorldStore.save) acquires ``world.lock`` itself;
+      it must not hold any other lock that World methods could reach
+      while doing so (World methods reach only the bus, and only after
+      releasing this lock).
+    * Returned ``Entity``/``Component`` objects are the live objects,
+      exactly as before B1. The lock guarantees the *registry and
+      indexes* are consistent; it cannot police a caller that mutates
+      a returned component's fields directly. Structural changes must
+      go through World/Yggdrasil methods (which hold the lock); the
+      tree's own compound mutations in ``ecs/yggdrasil.py`` do so.
     """
 
     def __init__(
@@ -43,6 +77,10 @@ class World:
         *,
         bus: "EventBus | None" = None,
     ) -> None:
+        # The lock exists before anything else: every other field is
+        # guarded state, and bus registration below must not race a
+        # (paranoid) early publish.
+        self._lock = threading.RLock()
         self.world_id: str = world_id
         self.world_name: str = world_name or world_id
         self.created_at: datetime = _now()
@@ -66,6 +104,18 @@ class World:
         self._tag_index: dict[str, set[str]] = defaultdict(set)          # tag → entity_ids
         self._comp_type_index: dict[str, set[str]] = defaultdict(set)    # comp_type → entity_ids
 
+    @property
+    def lock(self) -> threading.RLock:
+        """The re-entrant lock guarding all World registry state.
+
+        Exposed (additive, Phase B1) so compound operations built on
+        top of World — ``YggdrasilTree`` placements, ``PassiveOracle``
+        queries, ``WorldStore.save`` snapshots — can hold one
+        consistent view across several World calls. Re-entrant: World
+        methods called while it is held simply re-enter.
+        """
+        return self._lock
+
     # ------------------------------------------------------------------
     # Entity operations
     # ------------------------------------------------------------------
@@ -73,52 +123,60 @@ class World:
     def create_entity(self, *, entity_id: str | None = None, tags: set[str] | None = None) -> Entity:
         """Create a new entity and add it to the world."""
         eid = entity_id or _new_id()
-        if eid in self._entities:
-            raise ValueError(f"Entity '{eid}' already exists in this world")
-        entity = Entity(entity_id=eid, tags=set(tags or []))
-        self._entities[eid] = entity
-        for tag in entity.tags:
-            self._tag_index[tag].add(eid)
+        with self._lock:
+            if eid in self._entities:
+                raise ValueError(f"Entity '{eid}' already exists in this world")
+            entity = Entity(entity_id=eid, tags=set(tags or []))
+            self._entities[eid] = entity
+            for tag in entity.tags:
+                self._tag_index[tag].add(eid)
+            emit_tags = sorted(entity.tags)
         self._emit(
             "world.entity_created",
-            {"entity_id": eid, "tags": sorted(entity.tags)},
+            {"entity_id": eid, "tags": emit_tags},
         )
         return entity
 
     def get_entity(self, entity_id: str) -> Entity | None:
-        return self._entities.get(entity_id)
+        with self._lock:
+            return self._entities.get(entity_id)
 
     def remove_entity(self, entity_id: str) -> None:
         """Remove entity and all its components. Non-destructive: raises if missing."""
-        entity = self._entities.pop(entity_id, None)
-        if entity is None:
-            raise KeyError(f"Entity '{entity_id}' not found")
-        # Remove from tag index
-        for tag in entity.tags:
-            self._tag_index[tag].discard(entity_id)
-        # Remove all components
-        for comp_type in list(self._components.get(entity_id, {}).keys()):
-            self._comp_type_index[comp_type].discard(entity_id)
-        self._components.pop(entity_id, None)
+        with self._lock:
+            entity = self._entities.pop(entity_id, None)
+            if entity is None:
+                raise KeyError(f"Entity '{entity_id}' not found")
+            # Remove from tag index
+            for tag in entity.tags:
+                self._tag_index[tag].discard(entity_id)
+            # Remove all components
+            for comp_type in list(self._components.get(entity_id, {}).keys()):
+                self._comp_type_index[comp_type].discard(entity_id)
+            self._components.pop(entity_id, None)
         self._emit("world.entity_removed", {"entity_id": entity_id})
 
     def tag_entity(self, entity_id: str, tag: str) -> None:
-        entity = self._require_entity(entity_id)
-        entity.add_tag(tag)
-        self._tag_index[tag].add(entity_id)
+        with self._lock:
+            entity = self._require_entity(entity_id)
+            entity.add_tag(tag)
+            self._tag_index[tag].add(entity_id)
 
     def untag_entity(self, entity_id: str, tag: str) -> None:
-        entity = self._require_entity(entity_id)
-        entity.remove_tag(tag)
-        self._tag_index[tag].discard(entity_id)
+        with self._lock:
+            entity = self._require_entity(entity_id)
+            entity.remove_tag(tag)
+            self._tag_index[tag].discard(entity_id)
 
     def all_entities(self, *, active_only: bool = True) -> list[Entity]:
-        if active_only:
-            return [e for e in self._entities.values() if e.active]
-        return list(self._entities.values())
+        with self._lock:
+            if active_only:
+                return [e for e in self._entities.values() if e.active]
+            return list(self._entities.values())
 
     def entity_count(self) -> int:
-        return len(self._entities)
+        with self._lock:
+            return len(self._entities)
 
     # ------------------------------------------------------------------
     # Component operations
@@ -126,14 +184,15 @@ class World:
 
     def add_component(self, entity_id: str, component: Component) -> None:
         """Attach a component to an entity. Replaces existing component of the same type."""
-        self._require_entity(entity_id)
-        if component.entity_id != entity_id:
-            raise ValueError(
-                f"Component entity_id '{component.entity_id}' does not match target '{entity_id}'"
-            )
         comp_type = component.component_type
-        self._components[entity_id][comp_type] = component
-        self._comp_type_index[comp_type].add(entity_id)
+        with self._lock:
+            self._require_entity(entity_id)
+            if component.entity_id != entity_id:
+                raise ValueError(
+                    f"Component entity_id '{component.entity_id}' does not match target '{entity_id}'"
+                )
+            self._components[entity_id][comp_type] = component
+            self._comp_type_index[comp_type].add(entity_id)
         self._emit(
             "world.component_added",
             {"entity_id": entity_id, "component_type": comp_type},
@@ -165,28 +224,30 @@ class World:
         contract). When None, the dataclass default factories do their
         own reads, exactly like :meth:`create_entity`.
         """
-        if entity_id in self._entities:
-            raise ValueError(f"Entity '{entity_id}' already exists in this world")
-        if component.entity_id != entity_id:
-            raise ValueError(
-                f"Component entity_id '{component.entity_id}' does not match target '{entity_id}'"
-            )
-        if stamp is None:
-            entity = Entity(entity_id=entity_id, tags=set(tags or []))
-        else:
-            entity = Entity(
-                entity_id=entity_id, tags=set(tags or []),
-                created_at=stamp, updated_at=stamp,
-            )
-        self._entities[entity_id] = entity
-        for tag in entity.tags:
-            self._tag_index[tag].add(entity_id)
-        comp_type = component.component_type
-        self._components[entity_id][comp_type] = component
-        self._comp_type_index[comp_type].add(entity_id)
+        with self._lock:
+            if entity_id in self._entities:
+                raise ValueError(f"Entity '{entity_id}' already exists in this world")
+            if component.entity_id != entity_id:
+                raise ValueError(
+                    f"Component entity_id '{component.entity_id}' does not match target '{entity_id}'"
+                )
+            if stamp is None:
+                entity = Entity(entity_id=entity_id, tags=set(tags or []))
+            else:
+                entity = Entity(
+                    entity_id=entity_id, tags=set(tags or []),
+                    created_at=stamp, updated_at=stamp,
+                )
+            self._entities[entity_id] = entity
+            for tag in entity.tags:
+                self._tag_index[tag].add(entity_id)
+            comp_type = component.component_type
+            self._components[entity_id][comp_type] = component
+            self._comp_type_index[comp_type].add(entity_id)
+            emit_tags = sorted(entity.tags)
         self._emit(
             "world.entity_created",
-            {"entity_id": entity_id, "tags": sorted(entity.tags)},
+            {"entity_id": entity_id, "tags": emit_tags},
         )
         self._emit(
             "world.component_added",
@@ -195,7 +256,8 @@ class World:
         return entity
 
     def get_component(self, entity_id: str, component_type: str) -> Component | None:
-        return self._components.get(entity_id, {}).get(component_type)
+        with self._lock:
+            return self._components.get(entity_id, {}).get(component_type)
 
     def get_component_typed(self, entity_id: str, component_type: str, cls: type) -> object | None:
         comp = self.get_component(entity_id, component_type)
@@ -204,16 +266,22 @@ class World:
         return comp
 
     def get_all_components(self, entity_id: str) -> list[Component]:
-        return list(self._components.get(entity_id, {}).values())
+        with self._lock:
+            return list(self._components.get(entity_id, {}).values())
 
     def has_component(self, entity_id: str, component_type: str) -> bool:
-        return component_type in self._components.get(entity_id, {})
+        with self._lock:
+            return component_type in self._components.get(entity_id, {})
 
     def remove_component(self, entity_id: str, component_type: str) -> None:
-        self._require_entity(entity_id)
-        if component_type in self._components.get(entity_id, {}):
-            del self._components[entity_id][component_type]
-            self._comp_type_index[component_type].discard(entity_id)
+        removed = False
+        with self._lock:
+            self._require_entity(entity_id)
+            if component_type in self._components.get(entity_id, {}):
+                del self._components[entity_id][component_type]
+                self._comp_type_index[component_type].discard(entity_id)
+                removed = True
+        if removed:
             self._emit(
                 "world.component_removed",
                 {"entity_id": entity_id, "component_type": component_type},
@@ -224,56 +292,73 @@ class World:
     # ------------------------------------------------------------------
 
     def query_by_tag(self, tag: str, *, active_only: bool = True) -> list[Entity]:
-        ids = self._tag_index.get(tag, set())
-        entities = [self._entities[eid] for eid in ids if eid in self._entities]
-        if active_only:
-            entities = [e for e in entities if e.active]
-        return entities
+        with self._lock:
+            ids = self._tag_index.get(tag, set())
+            entities = [self._entities[eid] for eid in ids if eid in self._entities]
+            if active_only:
+                entities = [e for e in entities if e.active]
+            return entities
 
     def query_by_tags(self, tags: set[str], *, active_only: bool = True) -> list[Entity]:
         """Return entities that have ALL of the given tags."""
         if not tags:
             return self.all_entities(active_only=active_only)
-        ids: set[str] | None = None
-        for tag in tags:
-            tag_ids = self._tag_index.get(tag, set())
-            ids = tag_ids if ids is None else ids & tag_ids
-        if ids is None:
-            return []
-        entities = [self._entities[eid] for eid in ids if eid in self._entities]
-        if active_only:
-            entities = [e for e in entities if e.active]
-        return entities
+        with self._lock:
+            ids: set[str] | None = None
+            for tag in tags:
+                tag_ids = self._tag_index.get(tag, set())
+                ids = tag_ids if ids is None else ids & tag_ids
+            if ids is None:
+                return []
+            entities = [self._entities[eid] for eid in ids if eid in self._entities]
+            if active_only:
+                entities = [e for e in entities if e.active]
+            return entities
 
     def query_with_component(self, component_type: str, *, active_only: bool = True) -> list[Entity]:
-        ids = self._comp_type_index.get(component_type, set())
-        entities = [self._entities[eid] for eid in ids if eid in self._entities]
-        if active_only:
-            entities = [e for e in entities if e.active]
-        return entities
+        with self._lock:
+            ids = self._comp_type_index.get(component_type, set())
+            entities = [self._entities[eid] for eid in ids if eid in self._entities]
+            if active_only:
+                entities = [e for e in entities if e.active]
+            return entities
 
     def query_with_components(self, component_types: list[str], *, active_only: bool = True) -> list[Entity]:
         """Return entities that have ALL of the given component types."""
         if not component_types:
             return self.all_entities(active_only=active_only)
-        ids: set[str] | None = None
-        for ct in component_types:
-            ct_ids = self._comp_type_index.get(ct, set())
-            ids = ct_ids if ids is None else ids & ct_ids
-        if ids is None:
-            return []
-        entities = [self._entities[eid] for eid in ids if eid in self._entities]
-        if active_only:
-            entities = [e for e in entities if e.active]
-        return entities
+        with self._lock:
+            ids: set[str] | None = None
+            for ct in component_types:
+                ct_ids = self._comp_type_index.get(ct, set())
+                ids = ct_ids if ids is None else ids & ct_ids
+            if ids is None:
+                return []
+            entities = [self._entities[eid] for eid in ids if eid in self._entities]
+            if active_only:
+                entities = [e for e in entities if e.active]
+            return entities
 
     def iter_components(self, component_type: str) -> Iterator[tuple[Entity, Component]]:
-        """Yield (entity, component) pairs for all entities with this component."""
-        for entity_id in list(self._comp_type_index.get(component_type, set())):
-            entity = self._entities.get(entity_id)
-            comp = self._components.get(entity_id, {}).get(component_type)
-            if entity and comp and entity.active:
-                yield entity, comp
+        """Yield (entity, component) pairs for all entities with this component.
+
+        Phase B1: the pairs are materialised under the world lock and
+        then yielded from that snapshot. The pre-B1 body snapshotted
+        only the id set and resolved entities/components lazily during
+        iteration, so a concurrent mutation could raise mid-iteration
+        or yield a torn view; holding the lock across a generator's
+        yields instead would let a slow consumer stall every writer
+        for an unbounded time. A materialised snapshot is the sound
+        middle: one consistent view, no lock held while yielding.
+        """
+        with self._lock:
+            pairs: list[tuple[Entity, Component]] = []
+            for entity_id in list(self._comp_type_index.get(component_type, set())):
+                entity = self._entities.get(entity_id)
+                comp = self._components.get(entity_id, {}).get(component_type)
+                if entity and comp and entity.active:
+                    pairs.append((entity, comp))
+        yield from pairs
 
     # ------------------------------------------------------------------
     # World identity (Roadmap Worlds, Slice 0)
@@ -286,22 +371,24 @@ class World:
         when the world models manifest entities, otherwise "potential".
         """
         from wyrdforge.ecs.components.world_identity import WorldIdentity
-        self.identity = WorldIdentity(
-            world_id=self.world_id,
-            kind=kind,
-            reality=reality,
-            description=description or self.world_name,
-            source=source or "WYRD Protocol ECS world",
-        )
-        return self.identity
+        with self._lock:
+            self.identity = WorldIdentity(
+                world_id=self.world_id,
+                kind=kind,
+                reality=reality,
+                description=description or self.world_name,
+                source=source or "WYRD Protocol ECS world",
+            )
+            return self.identity
 
     def registry_entry(self) -> dict:
         """The handshake dict for Verðandi's WorldRegistry.register()."""
         from wyrdforge.ecs.components.world_identity import UnidentifiedWorldError
-        if self.identity is None:
-            raise UnidentifiedWorldError(
-                f"World '{self.world_id}' has no identity — call identify() first.")
-        return self.identity.registry_entry()
+        with self._lock:
+            if self.identity is None:
+                raise UnidentifiedWorldError(
+                    f"World '{self.world_id}' has no identity — call identify() first.")
+            return self.identity.registry_entry()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -312,6 +399,9 @@ class World:
 
         No-op when this World is not bus-wired.  A failing bus must not
         break ECS semantics, so publish errors are swallowed.
+
+        World methods invoke this AFTER their own critical section
+        (Phase B1 — see the class docstring's lock-ordering rule).
         """
         bus = getattr(self, "_bus", None)
         if bus is None:
@@ -322,13 +412,15 @@ class World:
             pass
 
     def _require_entity(self, entity_id: str) -> Entity:
-        entity = self._entities.get(entity_id)
-        if entity is None:
-            raise KeyError(f"Entity '{entity_id}' not found in world '{self.world_id}'")
-        return entity
+        with self._lock:
+            entity = self._entities.get(entity_id)
+            if entity is None:
+                raise KeyError(f"Entity '{entity_id}' not found in world '{self.world_id}'")
+            return entity
 
     def __repr__(self) -> str:
-        return (
-            f"World(id={self.world_id!r}, entities={self.entity_count()}, "
-            f"component_types={len(self._comp_type_index)})"
-        )
+        with self._lock:
+            return (
+                f"World(id={self.world_id!r}, entities={len(self._entities)}, "
+                f"component_types={len(self._comp_type_index)})"
+            )

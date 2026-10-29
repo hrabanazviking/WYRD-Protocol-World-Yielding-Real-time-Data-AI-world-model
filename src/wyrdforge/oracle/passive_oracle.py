@@ -68,6 +68,22 @@ class PassiveOracle:
                       observations.
         yggdrasil:    Optional YggdrasilTree for richer spatial navigation.
                       When omitted, spatial queries fall back to component scans.
+
+    Thread-safety (Phase B1): every query that reads ECS state runs
+    under ``world.lock`` for its whole duration, so each answer is one
+    consistent snapshot of the world — a query can never observe an
+    entity half-moved between locations, or an index mid-update.
+    Holding the lock across a whole ``build_context_packet`` (rather
+    than snapshotting the indexes up front) is the deliberate choice:
+    summaries are built from live Entity/Component objects across
+    several helper calls, and the packet's promise is that its focus,
+    location, and present-entity views agree with each other. The
+    memory-store reads interleaved in a packet build are safe under
+    the hold: the store uses per-thread SQLite connections and never
+    calls back into the World, so no lock cycle exists (world lock is
+    the outermost lock in this stack; the store takes no locks that
+    World code could wait on in reverse). Pure-store queries
+    (``get_facts``/``search_facts``) take no world lock at all.
     """
 
     def __init__(
@@ -87,28 +103,29 @@ class PassiveOracle:
 
     def where_is(self, entity_id: str) -> LocationResult | None:
         """Return the spatial position of an entity, or None if not in world."""
-        if self._world.get_entity(entity_id) is None:
-            return None
-        spatial = self._world.get_component(entity_id, "spatial")
-        if not isinstance(spatial, SpatialComponent):
+        with self._world.lock:
+            if self._world.get_entity(entity_id) is None:
+                return None
+            spatial = self._world.get_component(entity_id, "spatial")
+            if not isinstance(spatial, SpatialComponent):
+                return LocationResult(
+                    entity_id=entity_id,
+                    location_id=None,
+                    location_name=None,
+                    zone_id=None,
+                    region_id=None,
+                    path=[],
+                )
+            loc_id = spatial.most_specific_id()
+            loc_name = self._node_name(loc_id) if loc_id else None
             return LocationResult(
                 entity_id=entity_id,
-                location_id=None,
-                location_name=None,
-                zone_id=None,
-                region_id=None,
-                path=[],
+                location_id=loc_id,
+                location_name=loc_name,
+                zone_id=spatial.zone_id,
+                region_id=spatial.region_id,
+                path=spatial.path(),
             )
-        loc_id = spatial.most_specific_id()
-        loc_name = self._node_name(loc_id) if loc_id else None
-        return LocationResult(
-            entity_id=entity_id,
-            location_id=loc_id,
-            location_name=loc_name,
-            zone_id=spatial.zone_id,
-            region_id=spatial.region_id,
-            path=spatial.path(),
-        )
 
     # ------------------------------------------------------------------
     # Query 2: who_is_here
@@ -116,18 +133,19 @@ class PassiveOracle:
 
     def who_is_here(self, location_id: str) -> list[EntitySummary]:
         """Return summaries of non-spatial entities present at a location."""
-        if self._yggdrasil:
-            entities = self._yggdrasil.entities_at(location_id)
-        else:
-            entities = []
-            for entity, spatial in self._world.iter_components("spatial"):
-                if (
-                    isinstance(spatial, SpatialComponent)
-                    and spatial.most_specific_id() == location_id
-                    and not entity.has_tag("spatial_node")
-                ):
-                    entities.append(entity)
-        return [s for eid in [e.entity_id for e in entities] if (s := self._entity_summary(eid))]
+        with self._world.lock:
+            if self._yggdrasil:
+                entities = self._yggdrasil.entities_at(location_id)
+            else:
+                entities = []
+                for entity, spatial in self._world.iter_components("spatial"):
+                    if (
+                        isinstance(spatial, SpatialComponent)
+                        and spatial.most_specific_id() == location_id
+                        and not entity.has_tag("spatial_node")
+                    ):
+                        entities.append(entity)
+            return [s for eid in [e.entity_id for e in entities] if (s := self._entity_summary(eid))]
 
     # ------------------------------------------------------------------
     # Query 3: what_is
@@ -173,39 +191,40 @@ class PassiveOracle:
 
     def get_relations(self, entity_id: str) -> RelationResult:
         """Return faction membership and co-located entity IDs."""
-        faction_comp = self._world.get_component(entity_id, "faction")
-        faction_id: str | None = None
-        faction_name: str | None = None
-        reputations: dict[str, float] = {}
-        if isinstance(faction_comp, FactionComponent):
-            faction_id = faction_comp.faction_id or None
-            faction_name = faction_comp.faction_name or None
-            reputations = dict(faction_comp.reputation)
+        with self._world.lock:
+            faction_comp = self._world.get_component(entity_id, "faction")
+            faction_id: str | None = None
+            faction_name: str | None = None
+            reputations: dict[str, float] = {}
+            if isinstance(faction_comp, FactionComponent):
+                faction_id = faction_comp.faction_id or None
+                faction_name = faction_comp.faction_name or None
+                reputations = dict(faction_comp.reputation)
 
-        co_located: list[str] = []
-        if self._yggdrasil:
-            co_located = [e.entity_id for e in self._yggdrasil.get_co_located(entity_id)]
-        else:
-            spatial = self._world.get_component(entity_id, "spatial")
-            if isinstance(spatial, SpatialComponent):
-                loc_id = spatial.most_specific_id()
-                if loc_id:
-                    for ent, s in self._world.iter_components("spatial"):
-                        if (
-                            ent.entity_id != entity_id
-                            and isinstance(s, SpatialComponent)
-                            and s.most_specific_id() == loc_id
-                            and not ent.has_tag("spatial_node")
-                        ):
-                            co_located.append(ent.entity_id)
+            co_located: list[str] = []
+            if self._yggdrasil:
+                co_located = [e.entity_id for e in self._yggdrasil.get_co_located(entity_id)]
+            else:
+                spatial = self._world.get_component(entity_id, "spatial")
+                if isinstance(spatial, SpatialComponent):
+                    loc_id = spatial.most_specific_id()
+                    if loc_id:
+                        for ent, s in self._world.iter_components("spatial"):
+                            if (
+                                ent.entity_id != entity_id
+                                and isinstance(s, SpatialComponent)
+                                and s.most_specific_id() == loc_id
+                                and not ent.has_tag("spatial_node")
+                            ):
+                                co_located.append(ent.entity_id)
 
-        return RelationResult(
-            entity_id=entity_id,
-            faction_id=faction_id,
-            faction_name=faction_name,
-            faction_reputations=reputations,
-            co_located_entity_ids=co_located,
-        )
+            return RelationResult(
+                entity_id=entity_id,
+                faction_id=faction_id,
+                faction_name=faction_name,
+                faction_reputations=reputations,
+                co_located_entity_ids=co_located,
+            )
 
     # ------------------------------------------------------------------
     # Query 7: get_nearby
@@ -213,23 +232,24 @@ class PassiveOracle:
 
     def get_nearby(self, entity_id: str) -> list[EntitySummary]:
         """Return summaries of entities sharing the same location."""
-        if self._yggdrasil:
-            entities = self._yggdrasil.get_co_located(entity_id)
-        else:
-            spatial = self._world.get_component(entity_id, "spatial")
-            if not isinstance(spatial, SpatialComponent):
-                return []
-            loc_id = spatial.most_specific_id()
-            if not loc_id:
-                return []
-            entities = [
-                ent for ent, s in self._world.iter_components("spatial")
-                if ent.entity_id != entity_id
-                and isinstance(s, SpatialComponent)
-                and s.most_specific_id() == loc_id
-                and not ent.has_tag("spatial_node")
-            ]
-        return [s for eid in [e.entity_id for e in entities] if (s := self._entity_summary(eid))]
+        with self._world.lock:
+            if self._yggdrasil:
+                entities = self._yggdrasil.get_co_located(entity_id)
+            else:
+                spatial = self._world.get_component(entity_id, "spatial")
+                if not isinstance(spatial, SpatialComponent):
+                    return []
+                loc_id = spatial.most_specific_id()
+                if not loc_id:
+                    return []
+                entities = [
+                    ent for ent, s in self._world.iter_components("spatial")
+                    if ent.entity_id != entity_id
+                    and isinstance(s, SpatialComponent)
+                    and s.most_specific_id() == loc_id
+                    and not ent.has_tag("spatial_node")
+                ]
+            return [s for eid in [e.entity_id for e in entities] if (s := self._entity_summary(eid))]
 
     # ------------------------------------------------------------------
     # Query 8: search_facts
@@ -266,7 +286,30 @@ class PassiveOracle:
             include_policies:   Include ORLOG policy records.
             include_observations: Include recent HUGIN observations.
             max_observations:   How many recent observations to include.
+
+        Phase B1: the whole build runs under ``world.lock`` — one
+        consistent snapshot (see the class docstring for why holding
+        the lock was chosen over copying the indexes).
         """
+        with self._world.lock:
+            return self._build_context_packet_impl(
+                focus_entity_ids=focus_entity_ids,
+                location_id=location_id,
+                include_policies=include_policies,
+                include_observations=include_observations,
+                max_observations=max_observations,
+            )
+
+    def _build_context_packet_impl(
+        self,
+        *,
+        focus_entity_ids: list[str],
+        location_id: str | None = None,
+        include_policies: bool = True,
+        include_observations: bool = True,
+        max_observations: int = 5,
+    ) -> WorldContextPacket:
+        """Body of build_context_packet; caller holds ``world.lock``."""
         # Focus entities
         focus_entities = [
             s for eid in focus_entity_ids if (s := self._entity_summary(eid))
@@ -420,41 +463,54 @@ class PassiveOracle:
         )
 
     def _entity_summary(self, entity_id: str) -> EntitySummary | None:
-        entity = self._world.get_entity(entity_id)
-        if entity is None:
-            return None
+        # Locked so one summary never mixes components from two
+        # different moments (e.g. a name from before a move with a
+        # location from after it). Re-enters when a public query
+        # already holds the lock.
+        with self._world.lock:
+            entity = self._world.get_entity(entity_id)
+            if entity is None:
+                return None
 
-        name_comp = self._world.get_component(entity_id, "name")
-        name = name_comp.name if isinstance(name_comp, NameComponent) else None
+            name_comp = self._world.get_component(entity_id, "name")
+            name = name_comp.name if isinstance(name_comp, NameComponent) else None
 
-        desc_comp = self._world.get_component(entity_id, "description")
-        description = desc_comp.short_desc if isinstance(desc_comp, DescriptionComponent) else None
+            desc_comp = self._world.get_component(entity_id, "description")
+            description = desc_comp.short_desc if isinstance(desc_comp, DescriptionComponent) else None
 
-        status_comp = self._world.get_component(entity_id, "status")
-        status = status_comp.state if isinstance(status_comp, StatusComponent) else None
+            status_comp = self._world.get_component(entity_id, "status")
+            status = status_comp.state if isinstance(status_comp, StatusComponent) else None
 
-        spatial_comp = self._world.get_component(entity_id, "spatial")
-        location_id = (
-            spatial_comp.most_specific_id()
-            if isinstance(spatial_comp, SpatialComponent)
-            else None
-        )
+            spatial_comp = self._world.get_component(entity_id, "spatial")
+            location_id = (
+                spatial_comp.most_specific_id()
+                if isinstance(spatial_comp, SpatialComponent)
+                else None
+            )
 
-        return EntitySummary(
-            entity_id=entity_id,
-            name=name,
-            description=description,
-            status=status,
-            tags=sorted(entity.tags),
-            location_id=location_id,
-        )
+            return EntitySummary(
+                entity_id=entity_id,
+                name=name,
+                description=description,
+                status=status,
+                tags=sorted(entity.tags),
+                location_id=location_id,
+            )
 
     def _node_name(self, entity_id: str) -> str | None:
         name_comp = self._world.get_component(entity_id, "name")
         return name_comp.name if isinstance(name_comp, NameComponent) else None
 
     def _build_location_result_for_node(self, node_id: str) -> LocationResult:
-        """Build a LocationResult for a spatial node (location or sublocation)."""
+        """Build a LocationResult for a spatial node (location or sublocation).
+
+        Locked: the ancestor walk is several World calls and must see
+        one consistent tree (re-enters when called from a packet build).
+        """
+        with self._world.lock:
+            return self._build_location_result_for_node_locked(node_id)
+
+    def _build_location_result_for_node_locked(self, node_id: str) -> LocationResult:
         loc_name = self._node_name(node_id)
         zone_id: str | None = None
         region_id: str | None = None

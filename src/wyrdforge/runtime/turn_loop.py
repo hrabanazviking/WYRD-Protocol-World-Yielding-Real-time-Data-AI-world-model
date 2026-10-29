@@ -22,6 +22,7 @@ The connector (3) already had its own degradation path and is unchanged.
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -114,6 +115,15 @@ class TurnLoop:
         self._persona_notes = persona_notes
         self._history_limit = history_limit
         self._prompt_builder = PromptBuilder()
+        # Phase B1: one TurnLoop is shared by every request thread of
+        # its persona behind the threading HTTP server, so the history
+        # list is guarded state. _history_lock makes the user+assistant
+        # append pair atomic (two turns can never interleave into
+        # user/user/assistant/assistant), makes the prompt-build read a
+        # consistent snapshot, and serialises clear/get/count. Turns
+        # themselves are NOT serialised — the connector call stays
+        # outside any lock; only the shared list is guarded.
+        self._history_lock = threading.RLock()
         self._history: list[dict[str, str]] = []
         # Observability: one stable identity for the life of this loop.
         self.run_id = uuid.uuid4().hex
@@ -203,7 +213,8 @@ class TurnLoop:
             persona_name=self._persona_name,
             persona_notes=self._persona_notes,
         )
-        trimmed_history = self._history[-(self._history_limit * 2):]
+        with self._history_lock:
+            trimmed_history = self._history[-(self._history_limit * 2):]
         messages = self._prompt_builder.build_messages(
             system_prompt, trimmed_history, user_input
         )
@@ -263,10 +274,12 @@ class TurnLoop:
             contradictions_found = 0
         logger.debug("[turn_id=%s] stage 5: contradiction check done", turn_id)
 
-        # 6. Append to history
+        # 6. Append to history — the pair lands atomically (Phase B1):
+        #    a concurrent turn's pair can never interleave into this one.
         logger.debug("[turn_id=%s] stage 6: appending history", turn_id)
-        self._history.append({"role": "user", "content": user_input})
-        self._history.append({"role": "assistant", "content": response_text})
+        with self._history_lock:
+            self._history.append({"role": "user", "content": user_input})
+            self._history.append({"role": "assistant", "content": response_text})
         logger.debug("[turn_id=%s] stage 6: turn complete", turn_id)
 
         result = TurnResult(
@@ -352,12 +365,15 @@ class TurnLoop:
 
     def clear_history(self) -> None:
         """Wipe the in-memory conversation history."""
-        self._history.clear()
+        with self._history_lock:
+            self._history.clear()
 
     def get_history(self) -> list[dict[str, str]]:
         """Return a copy of the current conversation history."""
-        return list(self._history)
+        with self._history_lock:
+            return list(self._history)
 
     def history_turn_count(self) -> int:
         """Number of complete user/assistant turn-pairs in history."""
-        return len(self._history) // 2
+        with self._history_lock:
+            return len(self._history) // 2

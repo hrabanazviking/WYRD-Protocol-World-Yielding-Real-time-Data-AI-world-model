@@ -227,12 +227,50 @@ class WorldStore:
         """Persist all entities and components of a World to SQLite.
 
         Uses INSERT OR REPLACE so that re-saving updates existing rows.
+
+        Phase B1: the world is snapshotted under ``world.lock`` first
+        (entity rows, component JSON, id set — all serialised while
+        the lock is held, because the live Entity/Component objects
+        can be mutated by other threads), and the SQLite writes then
+        run outside the lock. A save therefore persists ONE consistent
+        moment of the world and never holds the world lock across
+        database I/O. (Before B1 the save iterated ``world._entities``
+        / ``world._components`` directly: a concurrent mutation could
+        raise mid-save or persist a torn world.)
         """
+        with world.lock:
+            world_row = (world.world_id, world.world_name, world.created_at.isoformat())
+            current_ids = set(world._entities.keys())
+            entity_rows = [
+                (
+                    world.world_id,
+                    entity.entity_id,
+                    json.dumps(list(entity.tags)),
+                    1 if entity.active else 0,
+                    entity.created_at.isoformat(),
+                    entity.updated_at.isoformat(),
+                )
+                for entity in world._entities.values()
+            ]
+            component_rows = [
+                (
+                    world.world_id,
+                    entity_id,
+                    comp_type,
+                    comp.model_dump_json(),
+                    comp.schema_version,
+                    comp.created_at.isoformat(),
+                    comp.updated_at.isoformat(),
+                )
+                for entity_id, comp_map in world._components.items()
+                for comp_type, comp in comp_map.items()
+            ]
+
         with self._connect() as conn:
             # Upsert world record
             conn.execute(
                 "INSERT OR REPLACE INTO worlds (world_id, world_name, created_at) VALUES (?,?,?)",
-                (world.world_id, world.world_name, world.created_at.isoformat()),
+                world_row,
             )
 
             # Delete stale entities/components (for entities removed since last save)
@@ -242,7 +280,6 @@ class WorldStore:
                     "SELECT entity_id FROM entities WHERE world_id=?", (world.world_id,)
                 )
             }
-            current_ids = set(world._entities.keys())
             for stale_id in existing_ids - current_ids:
                 conn.execute(
                     "DELETE FROM components WHERE world_id=? AND entity_id=?",
@@ -254,38 +291,22 @@ class WorldStore:
                 )
 
             # Upsert current entities
-            for entity in world._entities.values():
+            for entity_row in entity_rows:
                 conn.execute(
                     "INSERT OR REPLACE INTO entities "
                     "(world_id, entity_id, tags_json, active, created_at, updated_at) "
                     "VALUES (?,?,?,?,?,?)",
-                    (
-                        world.world_id,
-                        entity.entity_id,
-                        json.dumps(list(entity.tags)),
-                        1 if entity.active else 0,
-                        entity.created_at.isoformat(),
-                        entity.updated_at.isoformat(),
-                    ),
+                    entity_row,
                 )
 
             # Upsert current components
-            for entity_id, comp_map in world._components.items():
-                for comp_type, comp in comp_map.items():
-                    conn.execute(
-                        "INSERT OR REPLACE INTO components "
-                        "(world_id, entity_id, component_type, data_json, schema_version, created_at, updated_at) "
-                        "VALUES (?,?,?,?,?,?,?)",
-                        (
-                            world.world_id,
-                            entity_id,
-                            comp_type,
-                            comp.model_dump_json(),
-                            comp.schema_version,
-                            comp.created_at.isoformat(),
-                            comp.updated_at.isoformat(),
-                        ),
-                    )
+            for component_row in component_rows:
+                conn.execute(
+                    "INSERT OR REPLACE INTO components "
+                    "(world_id, entity_id, component_type, data_json, schema_version, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    component_row,
+                )
 
     # ------------------------------------------------------------------
     # Load
@@ -328,7 +349,11 @@ class WorldStore:
 
             world = World(world_id=row["world_id"], world_name=row["world_name"])
 
-            # Load entities
+            # Load entities. The World under construction is not yet
+            # shared with any other thread, so the direct internal
+            # writes below need no lock (Phase B1 note); once load
+            # returns and the caller publishes the World, all access
+            # goes through World's locked methods.
             entity_rows = conn.execute(
                 "SELECT entity_id, tags_json, active, created_at, updated_at "
                 "FROM entities WHERE world_id=? ORDER BY created_at",

@@ -27,6 +27,17 @@ class YggdrasilTree:
 
     The tree is not stored separately — it lives entirely in ECS components
     so that persistence, query, and serialization are handled uniformly.
+
+    Thread-safety (Phase B1): the tree has NO lock of its own. Every
+    operation here runs under ``world.lock`` (the World's re-entrant
+    lock), so a compound tree operation — e.g. a placement that reads
+    the parent chain, replaces a SpatialComponent, and mutates two
+    ContainerComponents — is atomic with respect to other threads, and
+    multi-step walks (ancestors, describe) see one consistent tree.
+    World methods called inside simply re-enter the same lock. The
+    lock-ordering rule is therefore trivial: world lock only, and
+    never hold it while calling anything that could block on another
+    subsystem (this class calls only World methods).
     """
 
     def __init__(self, world: World) -> None:
@@ -91,52 +102,57 @@ class YggdrasilTree:
         own hierarchy path. Optionally refined to a sublocation.
         """
         world = self._world
-        world._require_entity(entity_id)
-        loc_entity = world.get_entity(location_id)
-        if loc_entity is None:
-            raise KeyError(f"Location entity '{location_id}' not found")
+        with world.lock:
+            world._require_entity(entity_id)
+            loc_entity = world.get_entity(location_id)
+            if loc_entity is None:
+                raise KeyError(f"Location entity '{location_id}' not found")
 
-        # Build hierarchy path from the location node
-        loc_parent = world.get_component(location_id, "parent")
-        region_id: str | None = None
-        zone_id: str | None = None
-        if loc_parent and isinstance(loc_parent, ParentComponent):
-            region_id = loc_parent.parent_entity_id
-            if region_id:
-                reg_parent = world.get_component(region_id, "parent")
-                if reg_parent and isinstance(reg_parent, ParentComponent):
-                    zone_id = reg_parent.parent_entity_id
+            # Build hierarchy path from the location node
+            loc_parent = world.get_component(location_id, "parent")
+            region_id: str | None = None
+            zone_id: str | None = None
+            if loc_parent and isinstance(loc_parent, ParentComponent):
+                region_id = loc_parent.parent_entity_id
+                if region_id:
+                    reg_parent = world.get_component(region_id, "parent")
+                    if reg_parent and isinstance(reg_parent, ParentComponent):
+                        zone_id = reg_parent.parent_entity_id
 
-        spatial = SpatialComponent(
-            entity_id=entity_id,
-            zone_id=zone_id,
-            region_id=region_id,
-            location_id=location_id,
-            sublocation_id=sublocation_id,
-        )
-        world.add_component(entity_id, spatial)
+            spatial = SpatialComponent(
+                entity_id=entity_id,
+                zone_id=zone_id,
+                region_id=region_id,
+                location_id=location_id,
+                sublocation_id=sublocation_id,
+            )
+            world.add_component(entity_id, spatial)
 
-        # Register entity in the container
-        target_container_id = sublocation_id or location_id
-        container = world.get_component(target_container_id, "container")
-        if container and isinstance(container, ContainerComponent):
-            container.add_child(entity_id)
-            container.touch()
+            # Register entity in the container
+            target_container_id = sublocation_id or location_id
+            container = world.get_component(target_container_id, "container")
+            if container and isinstance(container, ContainerComponent):
+                container.add_child(entity_id)
+                container.touch()
 
     def move_entity(self, entity_id: str, *, location_id: str, sublocation_id: str | None = None) -> None:
         """Move an already-placed entity to a new location."""
         world = self._world
-        # Remove from old container
-        old_spatial = world.get_component(entity_id, "spatial")
-        if old_spatial and isinstance(old_spatial, SpatialComponent):
-            old_target = old_spatial.sublocation_id or old_spatial.location_id
-            if old_target:
-                old_container = world.get_component(old_target, "container")
-                if old_container and isinstance(old_container, ContainerComponent):
-                    old_container.remove_child(entity_id)
-                    old_container.touch()
-        # Place at new location
-        self.place_entity(entity_id, location_id=location_id, sublocation_id=sublocation_id)
+        # The whole move — detach from the old container, then place —
+        # runs under the world lock so no thread can observe the entity
+        # in both containers, or in neither.
+        with world.lock:
+            # Remove from old container
+            old_spatial = world.get_component(entity_id, "spatial")
+            if old_spatial and isinstance(old_spatial, SpatialComponent):
+                old_target = old_spatial.sublocation_id or old_spatial.location_id
+                if old_target:
+                    old_container = world.get_component(old_target, "container")
+                    if old_container and isinstance(old_container, ContainerComponent):
+                        old_container.remove_child(entity_id)
+                        old_container.touch()
+            # Place at new location (re-enters the same lock)
+            self.place_entity(entity_id, location_id=location_id, sublocation_id=sublocation_id)
 
     # ------------------------------------------------------------------
     # Navigation queries
@@ -158,26 +174,30 @@ class YggdrasilTree:
 
     def get_children(self, container_entity_id: str) -> list[Entity]:
         """Return all direct children of a container node."""
-        container = self._world.get_component(container_entity_id, "container")
-        if not container or not isinstance(container, ContainerComponent):
-            return []
-        return [
-            e for child_id in container.children
-            if (e := self._world.get_entity(child_id)) is not None
-        ]
+        with self._world.lock:
+            container = self._world.get_component(container_entity_id, "container")
+            if not container or not isinstance(container, ContainerComponent):
+                return []
+            # Copy the children list under the lock: ContainerComponent
+            # children are mutated in place by placements/moves.
+            return [
+                e for child_id in list(container.children)
+                if (e := self._world.get_entity(child_id)) is not None
+            ]
 
     def get_co_located(self, entity_id: str) -> list[Entity]:
         """Return all entities sharing the same most-specific location."""
-        loc_id = self.get_location_of(entity_id)
-        if not loc_id:
-            return []
-        container = self._world.get_component(loc_id, "container")
-        if not container or not isinstance(container, ContainerComponent):
-            return []
-        return [
-            e for child_id in container.children
-            if child_id != entity_id and (e := self._world.get_entity(child_id)) is not None and e.active
-        ]
+        with self._world.lock:
+            loc_id = self.get_location_of(entity_id)
+            if not loc_id:
+                return []
+            container = self._world.get_component(loc_id, "container")
+            if not container or not isinstance(container, ContainerComponent):
+                return []
+            return [
+                e for child_id in list(container.children)
+                if child_id != entity_id and (e := self._world.get_entity(child_id)) is not None and e.active
+            ]
 
     def get_ancestors(self, entity_id: str) -> list[Entity]:
         """Return the chain of parent spatial nodes from entity up to zone.
@@ -186,25 +206,26 @@ class YggdrasilTree:
         revisited entity id terminates the walk with a warning instead
         of hanging. Acyclic chains walk exactly as before.
         """
-        ancestors: list[Entity] = []
-        seen: set[str] = {entity_id}
-        parent_comp = self._world.get_component(entity_id, "parent")
-        while parent_comp and isinstance(parent_comp, ParentComponent) and parent_comp.parent_entity_id:
-            next_id = parent_comp.parent_entity_id
-            if next_id in seen:
-                logger.warning(
-                    "YggdrasilTree.get_ancestors: parent-chain cycle detected "
-                    "at %r — terminating walk",
-                    next_id,
-                )
-                break
-            parent = self._world.get_entity(next_id)
-            if parent is None:
-                break
-            ancestors.append(parent)
-            seen.add(next_id)
-            parent_comp = self._world.get_component(parent.entity_id, "parent")
-        return ancestors
+        with self._world.lock:
+            ancestors: list[Entity] = []
+            seen: set[str] = {entity_id}
+            parent_comp = self._world.get_component(entity_id, "parent")
+            while parent_comp and isinstance(parent_comp, ParentComponent) and parent_comp.parent_entity_id:
+                next_id = parent_comp.parent_entity_id
+                if next_id in seen:
+                    logger.warning(
+                        "YggdrasilTree.get_ancestors: parent-chain cycle detected "
+                        "at %r — terminating walk",
+                        next_id,
+                    )
+                    break
+                parent = self._world.get_entity(next_id)
+                if parent is None:
+                    break
+                ancestors.append(parent)
+                seen.add(next_id)
+                parent_comp = self._world.get_component(parent.entity_id, "parent")
+            return ancestors
 
     def find_by_name(self, name: str, *, case_sensitive: bool = False) -> list[Entity]:
         """Search all spatial nodes by name."""
@@ -226,23 +247,24 @@ class YggdrasilTree:
 
     def describe_tree(self) -> str:
         """Return a human-readable tree view of the Yggdrasil hierarchy."""
-        lines: list[str] = [f"Yggdrasil — {self._world.world_name}"]
-        zones = self._world.query_by_tag("zone")
-        for zone in zones:
-            lines.append(f"  [Zone] {self._label(zone)}")
-            for region in self.get_children(zone.entity_id):
-                if not region.has_tag("spatial_node"):
-                    continue
-                lines.append(f"    [Region] {self._label(region)}")
-                for location in self.get_children(region.entity_id):
-                    if not location.has_tag("spatial_node"):
+        with self._world.lock:
+            lines: list[str] = [f"Yggdrasil — {self._world.world_name}"]
+            zones = self._world.query_by_tag("zone")
+            for zone in zones:
+                lines.append(f"  [Zone] {self._label(zone)}")
+                for region in self.get_children(zone.entity_id):
+                    if not region.has_tag("spatial_node"):
                         continue
-                    lines.append(f"      [Location] {self._label(location)}")
-                    for sub in self.get_children(location.entity_id):
-                        if not sub.has_tag("spatial_node"):
+                    lines.append(f"    [Region] {self._label(region)}")
+                    for location in self.get_children(region.entity_id):
+                        if not location.has_tag("spatial_node"):
                             continue
-                        lines.append(f"        [Sub] {self._label(sub)}")
-        return "\n".join(lines)
+                        lines.append(f"      [Location] {self._label(location)}")
+                        for sub in self.get_children(location.entity_id):
+                            if not sub.has_tag("spatial_node"):
+                                continue
+                            lines.append(f"        [Sub] {self._label(sub)}")
+            return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -264,29 +286,33 @@ class YggdrasilTree:
         tags: set[str],
     ) -> Entity:
         world = self._world
-        entity = world.create_entity(entity_id=entity_id, tags=tags)
+        # Node creation is compound (entity + three components + parent
+        # container registration): atomic under the world lock, so a
+        # concurrent reader never sees a half-built node.
+        with world.lock:
+            entity = world.create_entity(entity_id=entity_id, tags=tags)
 
-        world.add_component(entity_id, NameComponent(entity_id=entity_id, name=name))
-        world.add_component(
-            entity_id,
-            ParentComponent(
-                entity_id=entity_id,
-                parent_entity_id=parent_id,
-                hierarchy_level=level,
-            ),
-        )
-        world.add_component(entity_id, ContainerComponent(entity_id=entity_id))
-        if description:
-            from wyrdforge.ecs.components.identity import DescriptionComponent
+            world.add_component(entity_id, NameComponent(entity_id=entity_id, name=name))
             world.add_component(
-                entity_id, DescriptionComponent(entity_id=entity_id, short_desc=description)
+                entity_id,
+                ParentComponent(
+                    entity_id=entity_id,
+                    parent_entity_id=parent_id,
+                    hierarchy_level=level,
+                ),
             )
+            world.add_component(entity_id, ContainerComponent(entity_id=entity_id))
+            if description:
+                from wyrdforge.ecs.components.identity import DescriptionComponent
+                world.add_component(
+                    entity_id, DescriptionComponent(entity_id=entity_id, short_desc=description)
+                )
 
-        # Register as child of parent container
-        if parent_id:
-            parent_container = world.get_component(parent_id, "container")
-            if parent_container and isinstance(parent_container, ContainerComponent):
-                parent_container.add_child(entity_id)
-                parent_container.touch()
+            # Register as child of parent container
+            if parent_id:
+                parent_container = world.get_component(parent_id, "container")
+                if parent_container and isinstance(parent_container, ContainerComponent):
+                    parent_container.add_child(entity_id)
+                    parent_container.touch()
 
-        return entity
+            return entity
