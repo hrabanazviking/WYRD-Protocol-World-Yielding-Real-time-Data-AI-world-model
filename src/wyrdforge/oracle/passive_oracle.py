@@ -38,6 +38,7 @@ from wyrdforge.models.common import ApprovalState, StoreName
 from wyrdforge.models.memory import (
     CanonicalFactRecord,
     ContradictionRecord,
+    ObservationKind,
     ObservationRecord,
     PolicyRecord,
 )
@@ -245,6 +246,61 @@ class PassiveOracle:
         ]
 
     # ------------------------------------------------------------------
+    # Filtered recent observations (place/kind aware)
+    # ------------------------------------------------------------------
+
+    def recent_observations(
+        self,
+        *,
+        place_id: str | None = None,
+        kind: str | ObservationKind | None = None,
+        limit: int = 5,
+    ) -> list[ObservationSummary]:
+        """Return recent Hugin observations filtered by place and/or kind.
+
+        The context-packet fetch is intentionally global; this query is the
+        narrower companion used for questions such as "what was just said in
+        this parcel?" Records in quarantine are never returned.
+        """
+        if limit < 0:
+            raise ValueError("limit must be >= 0")
+        if limit == 0:
+            return []
+
+        kind_value = kind.value if isinstance(kind, ObservationKind) else kind
+        records = [
+            r
+            for r in self._store.all(store=StoreName.HUGIN.value)
+            if isinstance(r, ObservationRecord)
+            and r.truth.approval_state != ApprovalState.QUARANTINED
+        ]
+        if place_id is not None:
+            records = [
+                r
+                for r in records
+                if r.content.structured_payload.place_id == place_id
+            ]
+        if kind_value is not None:
+            records = [
+                r
+                for r in records
+                if r.content.structured_payload.observation_kind.value == kind_value
+            ]
+        records.sort(
+            key=lambda r: r.content.structured_payload.observed_at,
+            reverse=True,
+        )
+        return [
+            ObservationSummary(
+                record_id=r.record_id,
+                title=r.content.title,
+                summary=r.content.summary,
+                observed_at=r.content.structured_payload.observed_at,
+            )
+            for r in records[:limit]
+        ]
+
+    # ------------------------------------------------------------------
     # Query 9: build_context_packet
     # ------------------------------------------------------------------
 
@@ -392,21 +448,7 @@ class PassiveOracle:
         self, max_observations: int
     ) -> list[ObservationSummary]:
         """Newest observations first (HUGIN layer)."""
-        observations: list[ObservationSummary] = []
-        obs_all = self._store.all(store=StoreName.HUGIN.value)
-        obs_typed = [r for r in obs_all if isinstance(r, ObservationRecord)]
-        obs_typed.sort(
-            key=lambda r: r.content.structured_payload.observed_at,
-            reverse=True,
-        )
-        for r in obs_typed[:max_observations]:
-            observations.append(ObservationSummary(
-                record_id=r.record_id,
-                title=r.content.title,
-                summary=r.content.summary,
-                observed_at=r.content.structured_payload.observed_at,
-            ))
-        return observations
+        return self.recent_observations(limit=max_observations)
 
     def _count_open_contradictions(self) -> int:
         """Count of unresolved contradictions (WYRD layer, count only)."""

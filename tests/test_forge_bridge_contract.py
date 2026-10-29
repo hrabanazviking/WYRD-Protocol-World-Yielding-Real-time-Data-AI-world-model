@@ -6,8 +6,10 @@ contract — the one abstract requirement is ``query(persona_id, user_input,
 implementations. Today only ``PythonRPGBridge`` actually claims that
 contract (by subclassing); the eight engine adapters (AgentZero, Hermes,
 Kindroid, NSE, OpenClaw, Verdandi, Voxta, and the HTTP server) expose
-engine-specific surfaces and deliberately do not. This test discovers all
-nine bridge modules, collects each module's primary bridge class, and pins
+engine-specific surfaces and deliberately do not. SlWyrdBridge, the
+Second Life bridge, also claims the contract by subclassing. This test
+discovers all ten bridge modules, collects each module's primary bridge
+class, and pins
 the current conformance map — so drift in *either* direction fails loudly:
 a conformant bridge that stops satisfying the contract, or an engine
 adapter that silently starts (or stops) claiming it.
@@ -32,7 +34,7 @@ from wyrdforge.bridges.base import BifrostBridge
 # Discovery
 # ---------------------------------------------------------------------------
 
-#: The nine bridge modules (base.py and runa_awareness.py carry no bridge
+#: The ten bridge modules (base.py and runa_awareness.py carry no bridge
 #: class and are excluded by design).
 EXPECTED_BRIDGE_MODULES = sorted([
     "agentzero_bridge",
@@ -42,6 +44,7 @@ EXPECTED_BRIDGE_MODULES = sorted([
     "nse_bridge",
     "openclaw_bridge",
     "python_rpg",
+    "secondlife_bridge",
     "verdandi_bridge",
     "voxta_bridge",
 ])
@@ -93,6 +96,7 @@ EXPECTED_CONFORMANCE = {
     "wyrdforge.bridges.nse_bridge.NSEWyrdBridge": False,
     "wyrdforge.bridges.openclaw_bridge.OpenClawWyrdBridge": False,
     "wyrdforge.bridges.python_rpg.PythonRPGBridge": True,
+    "wyrdforge.bridges.secondlife_bridge.SlWyrdBridge": True,
     "wyrdforge.bridges.verdandi_bridge.VerdandiBridge": False,
     "wyrdforge.bridges.voxta_bridge.VoxtaWyrdBridge": False,
 }
@@ -106,7 +110,7 @@ def _qualified(cls: type) -> str:
 # Discovery integrity
 # ---------------------------------------------------------------------------
 
-def test_all_nine_bridge_modules_discovered() -> None:
+def test_all_ten_bridge_modules_discovered() -> None:
     modules = _discover_bridge_modules()
     assert sorted(modules) == EXPECTED_BRIDGE_MODULES
 
