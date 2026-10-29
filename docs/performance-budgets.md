@@ -14,6 +14,7 @@ bridge_run_s: 30
 mirror_write_s: 1
 bus_publish_us_per_event: 40
 bus_replay_merge_ms: 15
+live_save_tick_ms: 150
 ```
 
 ## The budgets (B1–B6)
@@ -26,6 +27,7 @@ bus_replay_merge_ms: 15
 | B4 | Mirror JSON write (`wyrd_mirror.json`) | ≤ 1 s | **Verdandi-side** runner — outside this repo | existing heartbeat reporting |
 | B5 | EventBus publish throughput — `EventBus.publish` (`src/wyrdforge/runtime/events.py`) | ≤ 40 µs/event | repo — `tests/test_performance_budgets.py` (20k publishes, one subscriber, warmup, median of 3) | pytest, every suite run |
 | B6 | EventBus wildcard replay merge — `subscribe("bench.*", replay=True)` over buffered envelopes | ≤ 15 ms for 20 topics × 500 events | repo — `tests/test_performance_budgets.py` (warmup, median of 3; asserts global seq order) | pytest, every suite run |
+| B7 | Live-rate world save tick — `WorldStore.save` (Phase B2 incremental persistence) under 1 Hz presence churn (10 moves/tick) + chat-burst writes (100 component replaces every 5 ticks) at 1,000 entities / ~4,000 components | ≤ 150 ms median per tick | repo — `tests/test_incremental_persistence.py` (30 ticks, median; also asserts a machine-independent write-volume bound: total rows written < 5% of the full-save volume) | pytest, every suite run |
 
 B3 and B4 are the roadmap's own shape: the baselines describe the
 heartbeat worker, and this slice does not smuggle Verdandi-side code
@@ -44,6 +46,30 @@ context in `docs/scale-limits.md`, not enforced.
 | B4 mirror write | — | observed Verdandi-side | recorded |
 | B5 bus publish | — (new 2026-10-11) | **~7.5 µs/event** (median of 3, 20k publishes, one subscriber) | GREEN, ~5x margin |
 | B6 bus replay merge | — (new 2026-10-11) | **~1.85 ms** for 20×500 events (median of 3; seq order verified) | GREEN, ~8x margin |
+| B7 live save tick | — (new 2026-10-29, Phase B2) | **~37 ms median** per tick at 1,000 entities (3 runs: 36.4–37.7 ms) on the campaign VM under load | GREEN, ~4x margin |
+
+### Phase B2 — incremental persistence, before/after (2026-10-29)
+
+Whole-world saves were the first wall at live rates (roadmap §2.1):
+pre-B2 `WorldStore.save()` upserted every entity/component on every
+call. Measured on the campaign VM (same session, stash A/B, median
+of 5), 2,000 entities / 6,000 components:
+
+| save shape | pre-B2 (full every time) | B2 incremental |
+|---|---|---|
+| no-change re-save | ~113–120 ms, 8,000 rows written | ~60 ms, **0 rows written** |
+| churn tick (10 in-place spatial changes) | ~104–109 ms, 8,000 rows written | ~58 ms, **10 rows written** |
+| cold first save | ~90 ms | ~125–160 ms under load (DB-seeded baseline read + batched `executemany`; raw-write A/B at equal load: batched = loop, 22 ms vs 26 ms per 6,000 rows) |
+
+At the B7 harness scale (1,000 entities, 30 ticks of churn +
+bursts): **945 component rows written in total, vs ~120,000 for
+full saves (0.8%)**, and zero entity rows. The remaining tick cost
+is the B1 snapshot itself — every component is serialized under
+`world.lock` so the diff can compare its exact persisted bytes
+(that comparison is what makes in-place mutation detectable);
+database write cost now scales with the change set, snapshot CPU
+cost still scales with world size. Both facts are stated in
+`WorldStore.save_with_report`'s docstring; neither is hidden.
 
 ### Finding SLICE6-F1 — B1 exceeds its budget on this tree (2026-09-27)
 

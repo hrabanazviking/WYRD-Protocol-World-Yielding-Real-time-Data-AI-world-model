@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -159,6 +161,71 @@ class WorldLoadReport:
         return not self.failures
 
 
+# ---------------------------------------------------------------------------
+# Incremental persistence (Phase B2) — dirty-row tracking for save()
+# ---------------------------------------------------------------------------
+
+#: Rows per batched ``executemany`` chunk inside save(). All of a
+#: save's writes run under ONE savepoint inside the save's single
+#: transaction (``SAVEPOINT wyrd_save``): a failure rolls back to
+#: that savepoint, the exception propagates, and the outer
+#: ``with conn`` block rolls the whole save back — a save is still
+#: all-or-nothing, exactly like the pre-B2 full save. (Measured
+#: 2026-10-29: a savepoint PER CHUNK costs ~2x the write time under
+#: WAL + synchronous=FULL — 48 ms vs 22 ms for 6,000 component rows —
+#: while one savepoint for the whole batch costs nothing measurable.
+#: Hence one savepoint, batched executemany chunks inside it.)
+_SAVE_BATCH_ROWS = 400
+
+
+@dataclass(frozen=True)
+class SaveReport:
+    """What one :meth:`WorldStore.save_with_report` call actually did.
+
+    The counts are the incremental-persistence evidence: at live
+    rates a 1 Hz presence tick should write a handful of rows, not
+    the whole world. ``full=True`` marks a forced full save (every
+    current row written, sweep against the database itself).
+    """
+
+    world_id: str
+    full: bool
+    world_row_written: bool
+    entities_written: int
+    entities_deleted: int
+    components_written: int
+    components_deleted: int
+    entities_unchanged: int
+    components_unchanged: int
+    elapsed_ms: float
+
+
+@dataclass
+class _PersistedState:
+    """One store instance's record of what it last persisted.
+
+    The baseline a save diffs against. Fingerprints are the exact
+    persisted row tuples (minus ``world_id``) — for components that
+    includes the verbatim ``model_dump_json()`` payload, so ANY
+    change to a component's serialized form marks its row dirty,
+    including in-place field mutation that never passes through a
+    World method (``HealthComponent.take_damage()``,
+    ``ContainerComponent.add_child()``, direct field assignment,
+    ``touch()``). See :meth:`WorldStore.save_with_report`.
+
+    ``pinned_components`` are component keys whose stored rows this
+    baseline must never sweep: rows a load refused and quarantined
+    (Phase A4 — the original row is preserved by design). A pin is
+    dropped when its entity is deleted (the stale-entity sweep has
+    always removed every component of a deleted entity).
+    """
+
+    world_row: tuple | None = None
+    entities: dict[str, tuple] = field(default_factory=dict)
+    components: dict[tuple[str, str], tuple] = field(default_factory=dict)
+    pinned_components: set[tuple[str, str]] = field(default_factory=set)
+
+
 def _version_key(version: str) -> tuple[int, ...] | None:
     """Parse a dotted schema version into a comparable tuple.
 
@@ -194,6 +261,14 @@ class WorldStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Phase B2: incremental-save baselines, one per world_id, plus
+        # the lock serialising this instance's saves (the EventBus /
+        # World RLock house pattern). The baseline is only ever a
+        # write-skipping oracle: it is seeded from this store's own
+        # saves, from a load's rows, or from the database itself —
+        # never assumed. See save_with_report().
+        self._save_lock = threading.RLock()
+        self._persisted: dict[str, _PersistedState] = {}
         self._init_schema()
 
     # ------------------------------------------------------------------
@@ -223,29 +298,31 @@ class WorldStore:
     # Save
     # ------------------------------------------------------------------
 
-    def save(self, world: World) -> None:
-        """Persist all entities and components of a World to SQLite.
+    # -- Snapshot (shared by save and by load's baseline seeding) --
 
-        Uses INSERT OR REPLACE so that re-saving updates existing rows.
+    @staticmethod
+    def _snapshot_world(
+        world: World,
+    ) -> tuple[tuple, list[tuple], list[tuple]]:
+        """Serialise a world into persisted-row tuples, under its lock.
 
-        Phase B1: the world is snapshotted under ``world.lock`` first
-        (entity rows, component JSON, id set — all serialised while
-        the lock is held, because the live Entity/Component objects
-        can be mutated by other threads), and the SQLite writes then
-        run outside the lock. A save therefore persists ONE consistent
-        moment of the world and never holds the world lock across
-        database I/O. (Before B1 the save iterated ``world._entities``
-        / ``world._components`` directly: a concurrent mutation could
-        raise mid-save or persist a torn world.)
+        Phase B1 discipline, unchanged: every row (entity rows,
+        component JSON, id set) is materialised while ``world.lock``
+        is held, because the live Entity/Component objects can be
+        mutated by other threads; database I/O then runs outside the
+        lock. Phase B2 change: entity ``tags_json`` is serialised
+        sorted, so a row's bytes are a deterministic function of its
+        content (a set's iteration order otherwise makes identical
+        tag sets serialise differently between saves, defeating the
+        fingerprint diff — and stores nondeterministic bytes).
         """
         with world.lock:
             world_row = (world.world_id, world.world_name, world.created_at.isoformat())
-            current_ids = set(world._entities.keys())
             entity_rows = [
                 (
                     world.world_id,
                     entity.entity_id,
-                    json.dumps(list(entity.tags)),
+                    json.dumps(sorted(entity.tags)),
                     1 if entity.active else 0,
                     entity.created_at.isoformat(),
                     entity.updated_at.isoformat(),
@@ -265,48 +342,313 @@ class WorldStore:
                 for entity_id, comp_map in world._components.items()
                 for comp_type, comp in comp_map.items()
             ]
+        return world_row, entity_rows, component_rows
 
-        with self._connect() as conn:
-            # Upsert world record
-            conn.execute(
-                "INSERT OR REPLACE INTO worlds (world_id, world_name, created_at) VALUES (?,?,?)",
-                world_row,
+    @staticmethod
+    def _state_from_rows(
+        world_row: tuple | None,
+        entity_rows: list[tuple],
+        component_rows: list[tuple],
+    ) -> _PersistedState:
+        """Build a persisted-state baseline from full row tuples."""
+        return _PersistedState(
+            world_row=world_row,
+            entities={row[1]: row[1:] for row in entity_rows},
+            components={(row[1], row[2]): row[1:] for row in component_rows},
+        )
+
+    def _seed_state_from_db(self, conn: sqlite3.Connection, world_id: str) -> _PersistedState:
+        """Read the database's own rows for ``world_id`` as a baseline.
+
+        Used when this store instance has no baseline for the world
+        (first save through this instance — e.g. after a process
+        restart): the diff then runs against what the file actually
+        holds, not against an assumed-empty world, so a fresh store
+        instance still saves incrementally and still sweeps stale
+        rows. Component rows a previous load quarantined (present in
+        ``quarantined_components``) are pinned, never swept.
+        """
+        wrow = conn.execute(
+            "SELECT world_id, world_name, created_at FROM worlds WHERE world_id=?",
+            (world_id,),
+        ).fetchone()
+        entity_rows = [
+            tuple(row)
+            for row in conn.execute(
+                "SELECT world_id, entity_id, tags_json, active, created_at, updated_at "
+                "FROM entities WHERE world_id=?",
+                (world_id,),
             )
+        ]
+        component_rows = [
+            tuple(row)
+            for row in conn.execute(
+                "SELECT world_id, entity_id, component_type, data_json, schema_version, "
+                "created_at, updated_at FROM components WHERE world_id=?",
+                (world_id,),
+            )
+        ]
+        state = self._state_from_rows(
+            tuple(wrow) if wrow is not None else None, entity_rows, component_rows
+        )
+        state.pinned_components = {
+            (row[0], row[1])
+            for row in conn.execute(
+                "SELECT entity_id, component_type FROM quarantined_components "
+                "WHERE world_id=?",
+                (world_id,),
+            )
+        } & set(state.components)
+        return state
 
-            # Delete stale entities/components (for entities removed since last save)
-            existing_ids = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT entity_id FROM entities WHERE world_id=?", (world.world_id,)
+    @staticmethod
+    def _executemany_batched(
+        conn: sqlite3.Connection, sql: str, rows: list[tuple]
+    ) -> None:
+        """Run ``executemany`` in chunks of ``_SAVE_BATCH_ROWS``.
+
+        Chunking only — the savepoint discipline lives in
+        :meth:`save_with_report`, which wraps all of a save's writes
+        in one SAVEPOINT inside the save's transaction.
+        """
+        for start in range(0, len(rows), _SAVE_BATCH_ROWS):
+            conn.executemany(sql, rows[start : start + _SAVE_BATCH_ROWS])
+
+    def save(self, world: World, *, full: bool = False) -> None:
+        """Persist a World to SQLite — incrementally by default (B2).
+
+        Only rows whose serialized content changed since this store
+        last persisted the world are upserted; rows for deleted
+        entities/components are swept. ``full=True`` forces the
+        pre-B2 behaviour as a fallback: every current row is written
+        and the sweep runs against the database itself. The
+        historical signature and ``None`` return are unchanged;
+        callers that want the evidence use :meth:`save_with_report`.
+        """
+        self.save_with_report(world, full=full)
+
+    def save_with_report(self, world: World, *, full: bool = False) -> SaveReport:
+        """Persist a World and report exactly what was written.
+
+        Dirty tracking (Phase B2) — design and honest coverage:
+
+        * The world is snapshotted under ``world.lock`` exactly as
+          B1 built it (see :meth:`_snapshot_world`); each snapshot
+          row is then compared, byte for byte, against the baseline
+          of what this store last persisted for the world. A row
+          whose bytes differ — or that is new — is dirty and is
+          upserted; a baseline key absent from the snapshot is a
+          deletion and is swept; identical rows are not written.
+        * Because the fingerprint IS the serialized row, detection
+          covers every mutation path that changes persisted content:
+          World create/remove, component add/replace/remove,
+          tag/untag, Yggdrasil placement (which replaces the spatial
+          component and mutates container components in place),
+          direct entity changes (``deactivate()``), AND direct
+          component field mutation (``take_damage()``, field
+          assignment, ``touch()``, list mutation inside a component).
+          What it does NOT do is skip serializing unchanged rows:
+          detection happens at the snapshot surface B1 built, so a
+          save's CPU cost still scales with world size while its
+          database write cost scales with the change set. A mutation
+          that changes no persisted byte (e.g. setting a field to the
+          value it already holds) is correctly not written.
+        * The baseline comes only from evidence: this instance's own
+          last successful save, a load through this instance (the
+          loaded rows), or — on a cold cache — the database's own
+          current rows. It is updated ONLY after the save's
+          transaction commits, so a failed save leaves every pending
+          change dirty for the next one. The one assumption is the
+          store's long-standing one: a WorldStore instance is the
+          writer for its file. If another writer may have changed
+          the file behind this instance's back, call ``save(...,
+          full=True)`` — it re-reads the database and cannot skip a
+          needed write. When in doubt, the code falls back the same
+          way: any baseline doubt means full, never silent loss.
+        * Sweep semantics: the pre-B2 stale-entity sweep is preserved
+          exactly (a deleted entity's row and all its component rows
+          are deleted) and extended to components of live entities —
+          pre-B2, a component removed via ``remove_component`` was
+          never deleted from the store and RESURRECTED on the next
+          load (verified 2026-10-29 against the B1 tree); B2 sweeps
+          it, in incremental and full saves alike. One preservation
+          exception: component rows a load quarantined (Phase A4)
+          are pinned and never swept while their entity lives — A4's
+          doctrine is that the original row stays untouched; the pin
+          drops when the entity itself is deleted.
+
+        Writes run as batched ``executemany`` chunks
+        (:meth:`_executemany_batched`) under one SAVEPOINT inside the
+        save's single transaction — a save remains all-or-nothing.
+        This instance's
+        saves are serialised on ``_save_lock`` so two threads saving
+        through one store cannot interleave diff and commit; the
+        world lock is held only for the snapshot, never across I/O.
+        """
+        started = time.perf_counter()
+        with self._save_lock:
+            world_row, entity_rows, component_rows = self._snapshot_world(world)
+            current = self._state_from_rows(world_row, entity_rows, component_rows)
+
+            baseline = None if full else self._persisted.get(world.world_id)
+            diff: tuple | None = None
+            if baseline is not None:
+                diff = self._diff_against_baseline(
+                    baseline, current, entity_rows, component_rows, world_row, full=False
                 )
+                if not diff[4] and not diff[0] and not diff[1] and not diff[2] and not diff[3]:
+                    # Fast path: the cached baseline proves nothing
+                    # changed — no connection, no transaction, no
+                    # commit sync. The baseline already equals the
+                    # current snapshot, so it stays as it is.
+                    return SaveReport(
+                        world_id=world.world_id,
+                        full=False,
+                        world_row_written=False,
+                        entities_written=0,
+                        entities_deleted=0,
+                        components_written=0,
+                        components_deleted=0,
+                        entities_unchanged=len(entity_rows),
+                        components_unchanged=len(component_rows),
+                        elapsed_ms=(time.perf_counter() - started) * 1e3,
+                    )
+
+            with self._connect() as conn:
+                if baseline is None:
+                    # Cold cache (or a forced full save): the baseline
+                    # is the database's own current rows — evidence,
+                    # never an assumption.
+                    baseline = self._seed_state_from_db(conn, world.world_id)
+                    diff = self._diff_against_baseline(
+                        baseline, current, entity_rows, component_rows, world_row, full=full
+                    )
+                assert diff is not None and baseline is not None
+                (
+                    entities_to_write,
+                    components_to_write,
+                    stale_entity_ids,
+                    components_to_delete,
+                    world_row_written,
+                ) = diff
+
+                # All writes under one savepoint (batched savepoint
+                # discipline): any failure rolls back to it, the
+                # exception propagates, and the outer ``with conn``
+                # block rolls the whole save back.
+                conn.execute("SAVEPOINT wyrd_save")
+                try:
+                    if world_row_written:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO worlds (world_id, world_name, created_at) VALUES (?,?,?)",
+                            world_row,
+                        )
+                    if components_to_delete:
+                        self._executemany_batched(
+                            conn,
+                            "DELETE FROM components WHERE world_id=? AND entity_id=? AND component_type=?",
+                            [
+                                (world.world_id, eid, ctype)
+                                for eid, ctype in components_to_delete
+                            ],
+                        )
+                    if stale_entity_ids:
+                        self._executemany_batched(
+                            conn,
+                            "DELETE FROM entities WHERE world_id=? AND entity_id=?",
+                            [(world.world_id, eid) for eid in stale_entity_ids],
+                        )
+                    if entities_to_write:
+                        self._executemany_batched(
+                            conn,
+                            "INSERT OR REPLACE INTO entities "
+                            "(world_id, entity_id, tags_json, active, created_at, updated_at) "
+                            "VALUES (?,?,?,?,?,?)",
+                            entities_to_write,
+                        )
+                    if components_to_write:
+                        self._executemany_batched(
+                            conn,
+                            "INSERT OR REPLACE INTO components "
+                            "(world_id, entity_id, component_type, data_json, schema_version, created_at, updated_at) "
+                            "VALUES (?,?,?,?,?,?,?)",
+                            components_to_write,
+                        )
+                except Exception:
+                    conn.execute("ROLLBACK TO SAVEPOINT wyrd_save")
+                    conn.execute("RELEASE SAVEPOINT wyrd_save")
+                    raise
+                conn.execute("RELEASE SAVEPOINT wyrd_save")
+            # The transaction committed (the ``with conn`` block above
+            # is the commit boundary): the current snapshot becomes
+            # the baseline. On any exception this line is never
+            # reached and every pending change stays dirty.
+            current.pinned_components = {
+                key
+                for key in baseline.pinned_components
+                if key[0] in current.entities and key not in current.components
             }
-            for stale_id in existing_ids - current_ids:
-                conn.execute(
-                    "DELETE FROM components WHERE world_id=? AND entity_id=?",
-                    (world.world_id, stale_id),
-                )
-                conn.execute(
-                    "DELETE FROM entities WHERE world_id=? AND entity_id=?",
-                    (world.world_id, stale_id),
-                )
+            self._persisted[world.world_id] = current
 
-            # Upsert current entities
-            for entity_row in entity_rows:
-                conn.execute(
-                    "INSERT OR REPLACE INTO entities "
-                    "(world_id, entity_id, tags_json, active, created_at, updated_at) "
-                    "VALUES (?,?,?,?,?,?)",
-                    entity_row,
-                )
+        return SaveReport(
+            world_id=world.world_id,
+            full=full,
+            world_row_written=world_row_written,
+            entities_written=len(entities_to_write),
+            entities_deleted=len(stale_entity_ids),
+            components_written=len(components_to_write),
+            components_deleted=len(components_to_delete),
+            entities_unchanged=len(entity_rows) - len(entities_to_write) if not full else 0,
+            components_unchanged=len(component_rows) - len(components_to_write) if not full else 0,
+            elapsed_ms=(time.perf_counter() - started) * 1e3,
+        )
 
-            # Upsert current components
-            for component_row in component_rows:
-                conn.execute(
-                    "INSERT OR REPLACE INTO components "
-                    "(world_id, entity_id, component_type, data_json, schema_version, created_at, updated_at) "
-                    "VALUES (?,?,?,?,?,?,?)",
-                    component_row,
-                )
+    @staticmethod
+    def _diff_against_baseline(
+        baseline: _PersistedState,
+        current: _PersistedState,
+        entity_rows: list[tuple],
+        component_rows: list[tuple],
+        world_row: tuple,
+        *,
+        full: bool,
+    ) -> tuple[list[tuple], list[tuple], list[str], list[tuple[str, str]], bool]:
+        """Diff a snapshot against a persisted baseline.
+
+        Returns ``(entities_to_write, components_to_write,
+        stale_entity_ids, components_to_delete, world_row_written)``.
+        Components to sweep are baseline keys the world no longer
+        holds — except pinned (quarantined) rows of entities that
+        still live; components of deleted entities are always swept
+        (the pre-B2 stale-entity sweep semantics).
+        """
+        if full:
+            entities_to_write = entity_rows
+            components_to_write = component_rows
+        else:
+            entities_to_write = [
+                row for row in entity_rows if baseline.entities.get(row[1]) != row[1:]
+            ]
+            components_to_write = [
+                row
+                for row in component_rows
+                if baseline.components.get((row[1], row[2])) != row[1:]
+            ]
+        stale_entity_ids = sorted(set(baseline.entities) - set(current.entities))
+        stale_entity_set = set(stale_entity_ids)
+        components_to_delete = sorted(
+            key
+            for key in set(baseline.components) - set(current.components)
+            if key[0] in stale_entity_set or key not in baseline.pinned_components
+        )
+        world_row_written = full or baseline.world_row != world_row
+        return (
+            entities_to_write,
+            components_to_write,
+            stale_entity_ids,
+            components_to_delete,
+            world_row_written,
+        )
 
     # ------------------------------------------------------------------
     # Load
@@ -374,17 +716,30 @@ class WorldStore:
 
             # Load components — honestly (Phase A4).
             comp_rows = conn.execute(
-                "SELECT entity_id, component_type, data_json, schema_version "
+                "SELECT entity_id, component_type, data_json, schema_version, "
+                "created_at, updated_at "
                 "FROM components WHERE world_id=?",
                 (world_id,),
             ).fetchall()
 
+            pinned_rows: dict[tuple[str, str], tuple] = {}
             for cr in comp_rows:
                 failure = self._load_one_component(world, cr, known_types)
                 if failure is None:
                     report.loaded_components += 1
                 else:
                     report.failures.append(failure)
+                    # The refused row's own tuple, in snapshot-row
+                    # shape: the B2 baseline carries it as a pinned
+                    # entry (see the seeding below).
+                    pinned_rows[(cr["entity_id"], cr["component_type"])] = (
+                        cr["entity_id"],
+                        cr["component_type"],
+                        cr["data_json"],
+                        cr["schema_version"],
+                        cr["created_at"],
+                        cr["updated_at"],
+                    )
 
             # Preserve every refused payload verbatim, in the same
             # transaction as the load's connection block.
@@ -418,6 +773,23 @@ class WorldStore:
                         for f in report.failures
                     ),
                 )
+
+        # Phase B2: seed this store's incremental baseline from the
+        # world just loaded — its rows are what the database holds,
+        # so a first save after a load writes only what changed since
+        # the load. Components this load refused are pinned: their
+        # original rows stay untouched and are never swept while
+        # their entity lives (Phase A4 preservation).
+        with self._save_lock:
+            seed_row, seed_entities, seed_components = self._snapshot_world(world)
+            seeded = self._state_from_rows(seed_row, seed_entities, seed_components)
+            # Pinned entries join the baseline's component map with
+            # their stored rows, so the sweep logic can see them:
+            # pinned + entity alive -> never swept; pinned + entity
+            # deleted -> swept with the entity, as always.
+            seeded.components.update(pinned_rows)
+            seeded.pinned_components = set(pinned_rows)
+            self._persisted[world_id] = seeded
 
         return world, report
 
@@ -532,6 +904,8 @@ class WorldStore:
             conn.execute("DELETE FROM components WHERE world_id=?", (world_id,))
             conn.execute("DELETE FROM entities WHERE world_id=?", (world_id,))
             conn.execute("DELETE FROM worlds WHERE world_id=?", (world_id,))
+        with self._save_lock:
+            self._persisted.pop(world_id, None)
 
     def integrity_check(self) -> bool:
         with self._connect() as conn:
