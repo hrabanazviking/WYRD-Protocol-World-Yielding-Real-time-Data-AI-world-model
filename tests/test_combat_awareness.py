@@ -391,7 +391,7 @@ class TestPositioning:
         assert [(r.entity_id, r.range_band) for r in found] == [
             ("melee", "engaged"), ("archer", "near")]
         # Moving the archer changes the band — derived, never stored stale.
-        world.set_position("archer", (1.5, 0, 0))
+        world.set_position("archer", 1.5, 0, 0)
         found = oracle.combatants_within("hero", 30.0)
         assert [(r.entity_id, r.range_band) for r in found] == [
             ("melee", "engaged"), ("archer", "engaged")]
