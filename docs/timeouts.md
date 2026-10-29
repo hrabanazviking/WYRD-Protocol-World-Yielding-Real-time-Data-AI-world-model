@@ -21,8 +21,7 @@ call is introduced.
 | Watchdog restart budget | 4 consecutive restarts, then CRITICAL + stop; counter resets on healthy check and on `start_background()` | `src/wyrdforge/bridges/http_api.py:345-387` |
 | Pool `queue.get` | 1.0 s | `src/wyrdforge/hardening/pool.py:149` | bounded wait; exits on `_shutdown`/`_SENTINEL` |
 | Pool `queue.put` | non-blocking (`put_nowait`) | `src/wyrdforge/hardening/pool.py:90,113` | never blocks |
-| sqlite busy timeout (state, bond, world stores) | 5.0 s — **explicit**, was Python's implicit default | `src/wyrdforge/hardening/state_io.py:185`, `src/wyrdforge/persistence/bond_store.py:75`, `src/wyrdforge/persistence/world_store.py:71` | named default (behavior-identical) |
-| sqlite busy timeout (memory store) | 10.0 s + `PRAGMA busy_timeout=5000` | `src/wyrdforge/persistence/memory_store.py:117,121` | named default |
+| sqlite busy timeout (all three state stores) | 5.0 s connect timeout + `PRAGMA busy_timeout=5000` — **unified** by the Phase A persistence hardening pack: one connection factory (`connect_state_db`) for the state open path and all three stores | `src/wyrdforge/hardening/state_io.py` (`connect_state_db`, `STATE_BUSY_TIMEOUT_MS`) | named default; the memory store's former 10.0 s connect timeout was silently overridden by its own 5000 ms pragma, so 5 s was already its effective behaviour — unification changed no store's effective contention behaviour |
 | TUI `input()` / `Prompt.ask` | none — interactive by design | `tools/wyrd_tui.py` | the user is the timeout |
 
 ## Loops and their bounds

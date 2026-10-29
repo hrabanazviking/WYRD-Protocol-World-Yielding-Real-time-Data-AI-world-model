@@ -23,7 +23,7 @@ from wyrdforge.hardening.input_validation import (
     fts5_phrase,
     validate_search_query,
 )
-from wyrdforge.hardening.state_io import open_verified_state_db
+from wyrdforge.hardening.state_io import connect_state_db, open_verified_state_db
 
 if TYPE_CHECKING:
     from wyrdforge.runtime.events import EventBus
@@ -206,14 +206,22 @@ class PersistentMemoryStore:
             conn.executescript(_SCHEMA)
 
     def _new_connection(self) -> sqlite3.Connection:
-        """Open a fresh, fully-pragma'd SQLite connection (slice 8)."""
-        conn = sqlite3.connect(str(self._db_path), timeout=10.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=5000")      # wait up to 5 s on locked DB
-        conn.execute("PRAGMA auto_vacuum=INCREMENTAL") # reclaim space incrementally
-        return conn
+        """Open a fresh, fully-pragma'd SQLite connection (slice 8).
+
+        Phase A: built by the one shared factory (WAL +
+        synchronous=FULL + foreign_keys + unified 5 s busy timeout).
+        This store previously paired connect(timeout=10.0) with
+        PRAGMA busy_timeout=5000 — the pragma silently won, so the
+        unified 5 s is the behaviour it always effectively had.
+        auto_vacuum stays a store-specific extra pragma: incremental
+        space reclamation is a storage choice, not part of the
+        durability pack.
+        """
+        return connect_state_db(
+            self._db_path,
+            row_factory=True,
+            extra_pragmas=("PRAGMA auto_vacuum=INCREMENTAL",),
+        )
 
     def _connect(self) -> sqlite3.Connection:
         """Return this thread's cached SQLite connection (slice 8).

@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from wyrdforge.runtime.events import EventBus
 
 #: Topic emitted by quarantine_file when wired to an EventBus
@@ -155,6 +157,71 @@ def quarantine_file(path: str | Path, reason: str = "",
     return dest
 
 
+#: Unified busy timeout for every state-store connection, in
+#: milliseconds. Before the Phase A persistence hardening pack the
+#: three stores disagreed: the world and bond stores relied on
+#: ``connect(timeout=5.0)`` alone, while the memory store paired
+#: ``connect(timeout=10.0)`` with ``PRAGMA busy_timeout=5000`` — and
+#: the pragma silently overrode the connect timeout, so 5 s was the
+#: memory store's *effective* behaviour all along. All stores now
+#: standardise on that effective value, stated once, here.
+STATE_BUSY_TIMEOUT_MS = 5000
+
+#: sqlite3 connect() timeout in seconds. Kept exactly equal to the
+#: busy timeout the factory installs, so the two mechanisms can never
+#: contradict each other again.
+STATE_CONNECT_TIMEOUT_S = STATE_BUSY_TIMEOUT_MS / 1000.0
+
+
+def connect_state_db(
+    path: str | Path,
+    *,
+    row_factory: bool = False,
+    extra_pragmas: "Iterable[str]" = (),
+) -> sqlite3.Connection:
+    """The one connection factory for every WYRD state store.
+
+    Phase A persistence hardening pack: before this factory existed,
+    each store opened its SQLite connections by hand and the three had
+    drifted apart — durability rested on SQLite's unpinned
+    ``synchronous`` default (zero ``PRAGMA synchronous`` anywhere in
+    the tree), the bond store never enabled ``foreign_keys``, and the
+    busy timeouts disagreed (see :data:`STATE_BUSY_TIMEOUT_MS`).
+
+    Every connection this factory returns carries the uniform pack:
+
+    - ``journal_mode=WAL`` — the house journal mode.
+    - ``synchronous=FULL`` — durability pinned, never defaulted: a
+      committed turn survives power loss.
+    - ``foreign_keys=ON`` — declared constraints are enforced on
+      every store, the bond store included.
+    - ``busy_timeout=5000`` — one contention behaviour for all
+      stores, equal to the connect() timeout.
+
+    Args:
+        path:          The SQLite state file.
+        row_factory:   Set ``sqlite3.Row`` as the row factory (the
+                       world and bond stores' historical behaviour).
+        extra_pragmas: Store-specific extras applied after the pack,
+                       in order (the memory store passes its
+                       ``auto_vacuum=INCREMENTAL`` here — a storage
+                       choice, not part of the durability pack).
+
+    The caller owns the returned connection (context-manage or close
+    it). No schema is created here — stores keep that job.
+    """
+    conn = sqlite3.connect(str(path), timeout=STATE_CONNECT_TIMEOUT_S)
+    if row_factory:
+        conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=FULL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute(f"PRAGMA busy_timeout={STATE_BUSY_TIMEOUT_MS}")
+    for pragma in extra_pragmas:
+        conn.execute(pragma)
+    return conn
+
+
 def _read_user_version(conn: sqlite3.Connection) -> int:
     row = conn.execute("PRAGMA user_version").fetchone()
     try:
@@ -222,13 +289,12 @@ def open_state_db(
     existed = path.exists()
     conn = None
     try:
-        conn = sqlite3.connect(str(path), timeout=5.0)  # explicit: Python's default busy timeout
+        conn = connect_state_db(path)
         # Cheap smoke: SELECT 1 is a no-op, but reading user_version
         # forces SQLite to parse the database header — that is what
         # actually rejects garbage bytes.
         conn.execute("SELECT 1").fetchone()
         version = _read_user_version(conn)
-        conn.execute("PRAGMA journal_mode=WAL")
     except sqlite3.Error as exc:
         if conn is not None:
             conn.close()

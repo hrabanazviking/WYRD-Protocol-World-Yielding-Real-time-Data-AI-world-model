@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from wyrdforge.models.bond import BondEdge, Hurt, Vow
-from wyrdforge.hardening.state_io import open_verified_state_db
+from wyrdforge.hardening.state_io import connect_state_db, open_verified_state_db
 
 #: Schema version stamped as ``PRAGMA user_version`` on the bond DB.
 #: Bump when _SCHEMA gains a table/column, and add a forward migration.
@@ -33,13 +33,15 @@ CREATE TABLE IF NOT EXISTS bond_edges (
 
 CREATE TABLE IF NOT EXISTS vows (
     vow_id      TEXT PRIMARY KEY,
-    bond_id     TEXT NOT NULL,
+    bond_id     TEXT NOT NULL REFERENCES bond_edges(bond_id)
+                DEFERRABLE INITIALLY DEFERRED,
     data_json   TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS hurts (
     hurt_id     TEXT PRIMARY KEY,
-    bond_id     TEXT NOT NULL,
+    bond_id     TEXT NOT NULL REFERENCES bond_edges(bond_id)
+                DEFERRABLE INITIALLY DEFERRED,
     data_json   TEXT NOT NULL
 );
 
@@ -80,10 +82,16 @@ class PersistentBondStore:
             conn.executescript(_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._db_path), timeout=5.0)  # explicit: Python's default busy timeout
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        # Phase A: connections come from the one shared factory
+        # (WAL + synchronous=FULL + foreign_keys + unified busy
+        # timeout). This store previously ran with foreign_keys OFF
+        # and no FK declarations; its connections now enforce the
+        # vows/hurts -> bond_edges references declared in _SCHEMA.
+        # The FKs are DEFERRABLE INITIALLY DEFERRED so delete_edge's
+        # single transaction (edge, then vows, then hurts) still
+        # commits cleanly — the check lands at COMMIT, when no
+        # orphans remain.
+        return connect_state_db(self._db_path, row_factory=True)
 
     # ------------------------------------------------------------------
     # BondEdge

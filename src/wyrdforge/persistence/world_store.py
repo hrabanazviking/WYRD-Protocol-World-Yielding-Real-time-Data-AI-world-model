@@ -7,7 +7,7 @@ from pathlib import Path
 from wyrdforge.ecs.component import deserialize_component
 from wyrdforge.ecs.entity import Entity
 from wyrdforge.ecs.world import World
-from wyrdforge.hardening.state_io import open_verified_state_db
+from wyrdforge.hardening.state_io import connect_state_db, open_verified_state_db
 
 #: Schema version stamped as ``PRAGMA user_version`` on the world DB.
 #: Bump when _SCHEMA gains a table/column, and add a forward migration.
@@ -76,11 +76,10 @@ class WorldStore:
             conn.executescript(_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._db_path), timeout=5.0)  # explicit: Python's default busy timeout
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        # Phase A: connections come from the one shared factory
+        # (WAL + synchronous=FULL + foreign_keys + unified busy
+        # timeout). Previously hand-rolled per store, and drifted.
+        return connect_state_db(self._db_path, row_factory=True)
 
     # ------------------------------------------------------------------
     # Save

@@ -114,10 +114,17 @@ def test_edges_for_entity_empty_for_unknown() -> None:
 
 # ---------------------------------------------------------------------------
 # Vow
+#
+# Since the Phase A persistence hardening pack, vows/hurts carry an
+# enforced foreign key to bond_edges (the store previously ran with
+# foreign_keys OFF and no FK declared). Fixtures therefore save the
+# parent edge before its vows/hurts — that is the store's contract
+# now, and test_persistence_hardening.py pins the enforcement.
 # ---------------------------------------------------------------------------
 
 def test_save_and_load_vow_roundtrip() -> None:
     store = _store()
+    store.save_edge(_edge())
     vow = _vow()
     store.save_vow(vow)
     loaded = store.load_vow(vow.vow_id)
@@ -132,6 +139,8 @@ def test_load_missing_vow_returns_none() -> None:
 
 def test_vows_for_bond_returns_correct() -> None:
     store = _store()
+    store.save_edge(_edge("b1"))
+    store.save_edge(_edge("b2"))
     store.save_vow(_vow(bond_id="b1", vow_id="v1"))
     store.save_vow(_vow(bond_id="b2", vow_id="v2"))
     results = store.vows_for_bond("b1")
@@ -142,6 +151,7 @@ def test_vows_for_bond_returns_correct() -> None:
 def test_count_vows() -> None:
     store = _store()
     assert store.count_vows() == 0
+    store.save_edge(_edge())
     store.save_vow(_vow())
     assert store.count_vows() == 1
 
@@ -152,6 +162,7 @@ def test_count_vows() -> None:
 
 def test_save_and_load_hurt_roundtrip() -> None:
     store = _store()
+    store.save_edge(_edge())
     hurt = _hurt()
     store.save_hurt(hurt)
     loaded = store.load_hurt(hurt.hurt_id)
@@ -161,6 +172,8 @@ def test_save_and_load_hurt_roundtrip() -> None:
 
 def test_hurts_for_bond_returns_correct() -> None:
     store = _store()
+    store.save_edge(_edge("b1"))
+    store.save_edge(_edge("b2"))
     store.save_hurt(_hurt(bond_id="b1", hurt_id="h1"))
     store.save_hurt(_hurt(bond_id="b2", hurt_id="h2"))
     results = store.hurts_for_bond("b1")
@@ -170,6 +183,7 @@ def test_hurts_for_bond_returns_correct() -> None:
 def test_count_hurts() -> None:
     store = _store()
     assert store.count_hurts() == 0
+    store.save_edge(_edge())
     store.save_hurt(_hurt())
     assert store.count_hurts() == 1
 
@@ -190,6 +204,7 @@ def test_load_into_service_restores_edges() -> None:
 
 def test_load_into_service_restores_vows() -> None:
     store = _store()
+    store.save_edge(_edge("bond-001"))
     store.save_vow(_vow(bond_id="bond-001", vow_id="vow-X"))
     service = BondGraphService()
     store.load_into_service(service)
