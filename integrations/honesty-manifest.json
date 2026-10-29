@@ -259,7 +259,7 @@
       "kind": "sdk",
       "language": "C# (client SDK)",
       "previous_tests": "The xUnit suite itself is genuine (ProjectReference).",
-      "scope": "Needs the dotnet SDK, which this machine does not have. Genuine where dotnet exists.",
+      "scope": "Needs the dotnet SDK, which this machine does not have. Genuine where dotnet exists. E2 added full NuGet packaging metadata (PackageId/Version/authors/description/license/tags, IsPackable) and multi-targeting (netstandard2.0;netstandard2.1;net8.0, with the System.Text.Json package on netstandard and an IsExternalInit shim for the records/init accessors). The target surface was chosen by auditing the shipped sources, but C# COMPILATION IS NOT VERIFIED on this machine (no dotnet) and is not claimed.",
       "shipped": [
         "sdk/csharp/WyrdForge.Client/WyrdClient.cs"
       ]
@@ -278,12 +278,12 @@
     },
     "sdk/js": {
       "classification": "genuine-suite-elsewhere",
-      "executed_here": "npm ci + jest (ts-jest): 30 passed (E1 session)",
+      "executed_here": "npm ci + jest (ts-jest): 30 passed (E1 session; re-run in E2: 30 passed)",
       "honest_harness": "sdk/js/tests/client.test.ts (ts-jest, imports the shipped src/)",
       "kind": "sdk",
       "language": "TypeScript (JS SDK)",
       "previous_tests": "The ts-jest suite itself is genuine: it imports the shipped TypeScript source.",
-      "scope": "Needs npm-installed dev dependencies (jest/ts-jest/typescript). Executed in the E1 session after npm ci. A node-alone harness is NOT possible today: the shipped TS uses non-erasable syntax and type-only imports that Node's type stripping/transform cannot elide, and the package build is broken (missing scripts/build-esm.mjs \u2014 that is E2).",
+      "scope": "Needs npm-installed dev dependencies (jest/ts-jest/typescript). Executed in the E1 session after npm ci, and re-executed in E2 (jest 30 passed). A node-alone harness is NOT possible: the shipped TS uses non-erasable syntax and type-only imports that Node's type stripping cannot elide. The package build was broken at E1 (missing scripts/build-esm.mjs); E2 authored it, and `npm run build` now produces dist/index.cjs + dist/index.mjs + dist/index.d.ts from clean, proven by plain-node smoke checks (CJS require + package self-reference, ESM import, client construction, C2 /v1 + apiToken defaults intact).",
       "shipped": [
         "sdk/js/src/client.ts"
       ]
@@ -295,6 +295,7 @@
     "sdk_js_suite": "cd sdk/js && npm ci && npx jest  (ts-jest; imports the shipped src/)",
     "python_mirror_suites": "pytest <path named in the entry's previous_tests / the file itself> - each such file is labelled MIRROR / LOGIC TESTS in its own header; these counts are logic-spec counts, never shipped-code evidence",
     "pygame_suite": "PYTHONPATH=integrations/pygame/wyrdforge pytest integrations/pygame/wyrdforge/tests/test_wyrdforge.py",
-    "verified": "All executed_here counts in this manifest were re-measured by the E1 completion session on 2026-10-29 (node v24, g++ 13, dedicated campaign venv) and reproduced exactly."
+    "verified": "All executed_here counts in this manifest were re-measured by the E1 completion session on 2026-10-29 (node v24, g++ 13, dedicated campaign venv) and reproduced exactly.",
+    "sdk_js_build": "cd sdk/js && rm -rf dist && npm run build  (tsc CommonJS pass + scripts/build-esm.mjs: rewrites dist/*.js to .cjs and recompiles module ESNext to .mjs with specifiers rewritten; then plain-node smoke: require dist/index.cjs and import dist/index.mjs, construct WyrdClient)"
   }
 }

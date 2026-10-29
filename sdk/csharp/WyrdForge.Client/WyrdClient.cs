@@ -4,11 +4,15 @@
 //   using var client = new WyrdClient("localhost", 8765);
 //   string reply = await client.QueryAsync("sigrid", "What do the runes say?");
 
-using System.Net.Http.Json;
+// Phase E2: two unused usings removed for the netstandard targets —
+// `System.Net.Http.Json` (no *JsonAsync helpers are used; requests go
+// through JsonSerializer + StringContent) is a NuGet-only namespace
+// on netstandard, and `System.Web` does not exist there at all
+// (nothing in this file uses HttpUtility; escaping is
+// Uri.EscapeDataString). Behaviour is unchanged on net8.0.
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Web;
 
 namespace WyrdForge.Client;
 

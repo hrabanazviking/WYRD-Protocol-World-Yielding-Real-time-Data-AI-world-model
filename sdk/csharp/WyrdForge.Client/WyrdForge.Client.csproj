@@ -1,9 +1,41 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- Phase E2 (SDK publishing fixes): was a 9-line project with a
+         single net8.0 target and no packaging metadata at all — not a
+         NuGet package, and unusable by the Unity/OpenSim consumers
+         the SDK story names (neither consumes net8.0 assemblies).
+         Now multi-targets netstandard2.0 / netstandard2.1 (consumable
+         as a prebuilt assembly by Unity 2018+ / OpenSim-era runtimes)
+         alongside net8.0, with full NuGet metadata.
+         COMPILATION IS NOT VERIFIED on the campaign VM: it has no
+         dotnet SDK (verified E1/E2). The netstandard surface was
+         chosen by auditing the shipped sources (see IsExternalInit.cs
+         and the E2 section of the campaign state file). -->
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- The shipped code uses C# 12 syntax (primary constructors,
+         collection expressions) and C# 9 records/init accessors;
+         netstandard targets default to LangVersion 7.3/8.0, so pin
+         the language version explicitly. -->
+    <LangVersion>12.0</LangVersion>
+
+    <!-- NuGet packaging -->
+    <PackageId>WyrdForge.Client</PackageId>
+    <!-- Tracks the WYRD package version (pyproject.toml): Phase D = 1.4.0. -->
+    <Version>1.4.0</Version>
+    <Authors>Volmarr Wyrd</Authors>
+    <Description>C# client SDK for the WYRD Protocol HTTP API (WyrdHTTPServer). Async query/event/world client with bearer-token auth and the /v1 API surface.</Description>
+    <PackageLicenseExpression>CC-BY-4.0</PackageLicenseExpression>
+    <PackageTags>wyrd;wyrdforge;ai;world-model;npc;norse</PackageTags>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
+
+  <!-- System.Text.Json ships in the framework for net8.0 but is a
+       NuGet dependency for netstandard targets. -->
+  <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETStandard'">
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
 
 </Project>

@@ -41,6 +41,21 @@ dev = [
 # ("pip install fastapi uvicorn httpx"); the relay degrades
 # gracefully without them.
 
+# Phase E2 (SDK publishing fixes): console entry points for the
+# repo's real CLIs. The two root CLIs live in src/ as top-level
+# modules (shipped via py-modules below) so these entry points import
+# from an installed distribution, not just from the repo root; the
+# root wyrd_chat_cli.py / wyrd_world_cli.py files are shims that keep
+# `python wyrd_chat_cli.py` working. `wyrd-backup` is the Phase A5
+# cross-store backup CLI, which already exposed a module main.
+[project.scripts]
+wyrd-chat = "wyrd_chat_cli:main"
+wyrd-world = "wyrd_world_cli:main"
+wyrd-backup = "wyrdforge.persistence.backup:main"
+
+[tool.setuptools]
+py-modules = ["wyrd_chat_cli", "wyrd_world_cli"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
