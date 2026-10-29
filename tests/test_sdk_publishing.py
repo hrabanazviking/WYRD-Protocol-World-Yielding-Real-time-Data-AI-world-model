@@ -39,6 +39,10 @@ def test_console_scripts_declared_for_the_real_clis():
         "wyrd-chat": "wyrd_chat_cli:main",
         "wyrd-world": "wyrd_world_cli:main",
         "wyrd-backup": "wyrdforge.persistence.backup:main",
+        # Phase E4 added the inspector scripts (the pin is updated
+        # deliberately — E4's landing records it).
+        "wyrd-inspect": "wyrdforge.inspector:main",
+        "wyrd-inspect-tui": "wyrdforge.inspector_tui:main",
     }
 
 

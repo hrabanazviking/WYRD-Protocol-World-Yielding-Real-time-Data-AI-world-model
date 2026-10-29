@@ -31,6 +31,16 @@ dev = [
     "ruff>=0.4",            # lint
     "mypy>=1.9",            # type checking
 ]
+# Phase E4 (world inspector): Rich is the TUI presentation layer's
+# only dependency. It is an optional extra, NOT a core dependency:
+# the inspector's data surfaces (wyrdforge.inspector — state diff,
+# entity timeline, contradiction viewer, durable dead-letter
+# archaeology, and their plain-text CLI) are stdlib-only, and the
+# TUI already degrades gracefully to a simple CLI without Rich.
+# Core install therefore stays pydantic + pyyaml.
+inspector = [
+    "rich>=13.0",           # TUI rendering (wyrdforge.inspector_tui)
+]
 # NOTE — no [llm] / [full] extras, by standing policy (D3 ruling,
 # Volmarr 2026-09-26): sentence-transformers buys zero functionality
 # (nothing in the tree imports it — verified 2026-09-26) and
@@ -52,6 +62,11 @@ dev = [
 wyrd-chat = "wyrd_chat_cli:main"
 wyrd-world = "wyrd_world_cli:main"
 wyrd-backup = "wyrdforge.persistence.backup:main"
+# Phase E4 (world inspector): wyrd-inspect is the supported inspector
+# CLI (diff / timeline / contradictions / dead-letters / snapshot /
+# tui); wyrd-inspect-tui launches the TUI directly.
+wyrd-inspect = "wyrdforge.inspector:main"
+wyrd-inspect-tui = "wyrdforge.inspector_tui:main"
 
 [tool.setuptools]
 py-modules = ["wyrd_chat_cli", "wyrd_world_cli"]
