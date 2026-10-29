@@ -73,6 +73,16 @@ class PromptBuilder:
     def __init__(self, *, base_instructions: str = "") -> None:
         self._base = base_instructions or _DEFAULT_BASE
 
+    @property
+    def base_instructions(self) -> str:
+        """The base system instructions this builder was configured with.
+
+        Additive (Phase C4): TurnLoop's degraded stage-2 fallback builds
+        its smallest honest prompt from these instructions alone when
+        full prompt assembly fails.
+        """
+        return self._base
+
     def build_system_prompt(
         self,
         packet: WorldContextPacket,

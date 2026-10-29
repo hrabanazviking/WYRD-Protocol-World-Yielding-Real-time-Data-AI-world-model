@@ -13,23 +13,40 @@ The loop is intentionally stateless between turns except for conversation
 history (which is bounded by ``history_limit``).
 
 Helheim Hardening (resilience weave): each stage that can fail
-independently — oracle (1), writeback engine (4), contradiction detector
-(5) — is wrapped in its own try/except so one failing stage degrades the
-turn instead of aborting it.  Stage failures are recorded on
-``TurnResult.stage_errors`` as ``"stage_name: ExceptionType: message"``.
-The connector (3) already had its own degradation path and is unchanged.
+independently — oracle (1), prompt build (2), connector (3), writeback
+engine (4), contradiction detector (5) — is wrapped in its own try/except
+so one failing stage degrades the turn instead of aborting it.  Stage
+failures are recorded on ``TurnResult.stage_errors`` as
+``"stage_name: ExceptionType: message"``.
+
+Phase C4 (circuit breaker wiring): stage 3 no longer catches only
+``OllamaUnavailableError``.  The connector call runs through a
+:class:`~wyrdforge.hardening.circuit_breaker.CircuitBreaker` owned by
+the loop, with a bounded backoff retry *within* the turn (the breaker
+sees one verdict per turn: success, or failure after the bounded
+attempts are exhausted).  ANY connector exception therefore degrades
+the turn exactly as ``OllamaUnavailableError`` always did — fallback
+response, ``TurnResult.error`` set, history and later stages intact —
+instead of aborting it, and while the circuit is OPEN stage 3 fails
+fast (no connector call attempted) until the breaker's half-open
+probe is allowed.  Stage 2 is wrapped the same way: a prompt-build
+failure degrades to the smallest honest prompt (base instructions +
+persona, no world data) and the turn continues.
 """
 from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from pydantic import Field
 
-from wyrdforge.llm.ollama_connector import OllamaConnector, OllamaUnavailableError
+from wyrdforge.hardening.backoff import BackoffConfig
+from wyrdforge.hardening.circuit_breaker import CircuitBreaker, CircuitOpenError
+from wyrdforge.llm.ollama_connector import OllamaConnector
 from wyrdforge.llm.prompt_builder import PromptBuilder
 from wyrdforge.models.common import StrictModel
 from wyrdforge.oracle.models import WorldContextPacket
@@ -57,6 +74,21 @@ def _register_turn_topics(bus: "EventBus") -> None:
 #: Maximum accepted user_input length (characters).  Guards the prompt
 #: builder and the observation writer against pathological input.
 MAX_USER_INPUT_LEN = 20000
+
+#: Fallback assistant response when stage 3 cannot generate one
+#: (Phase C4: used for EVERY connector failure and for open-circuit
+#: fast-fails — the exact degradation ``OllamaUnavailableError``
+#: produced before C4).
+CONNECTOR_UNAVAILABLE_RESPONSE = "[Ollama unavailable — cannot generate response]"
+
+#: Phase C4 defaults, sized for a flaky local model provider: the
+#: breaker opens after 3 consecutive failed *turns* and allows a
+#: half-open probe after 30 s; within a turn the connector is tried
+#: at most 3 times with backoff delays of ~0.5 s then ~1.0 s, capped
+#: at 5 s (never the unbounded stall a turn loop must not risk).
+_DEFAULT_CONNECTOR_BACKOFF = BackoffConfig(
+    max_attempts=3, base_delay=0.5, max_delay=5.0, multiplier=2.0, jitter=0.25
+)
 
 
 class TurnResult(StrictModel):
@@ -99,6 +131,20 @@ class TurnLoop:
                           matching its CharacterContext user_id), and a
                           single turn may override via
                           ``execute_turn(..., speaker_id=...)``.
+        circuit_breaker:  Phase C4 — the breaker guarding stage 3's
+                          connector call, shared across this loop's
+                          turns.  Injectable; the default opens after
+                          3 consecutive failed turns and half-opens
+                          after 30 s (one probe).
+        connector_backoff: Phase C4 — bounded retry policy *within* a
+                          turn (default: 3 attempts, ~0.5 s / ~1.0 s
+                          delays capped at 5 s).  Tests pass a
+                          zero-delay config so no test sleeps.
+        backoff_sleeper:  Phase C4 — the sleep function used between
+                          backoff attempts (default ``time.sleep``);
+                          injectable so tests can record delays
+                          instead of waiting (the B5 injectable-source
+                          precedent).
     """
 
     def __init__(
@@ -115,6 +161,9 @@ class TurnLoop:
         history_limit: int = 10,
         speaker_id: str = "user",
         bus: "EventBus | None" = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        connector_backoff: BackoffConfig | None = None,
+        backoff_sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._oracle = oracle
         self._engine = engine
@@ -127,6 +176,17 @@ class TurnLoop:
         self._history_limit = history_limit
         self._speaker_id = speaker_id
         self._prompt_builder = PromptBuilder()
+        # Phase C4: stage-3 resilience — one breaker per loop (hence
+        # per persona behind the bridges), plus the bounded in-turn
+        # retry policy and its injectable sleeper.
+        self._circuit_breaker = circuit_breaker or CircuitBreaker(
+            failure_threshold=3,
+            reset_timeout=30.0,
+            half_open_probes=1,
+            name="turn-loop-connector",
+        )
+        self._connector_backoff = connector_backoff or _DEFAULT_CONNECTOR_BACKOFF
+        self._backoff_sleeper = backoff_sleeper or time.sleep
         # Phase B1: one TurnLoop is shared by every request thread of
         # its persona behind the threading HTTP server, so the history
         # list is guarded state. _history_lock makes the user+assistant
@@ -144,6 +204,68 @@ class TurnLoop:
         self._bus = bus
         if self._bus is not None:
             _register_turn_topics(self._bus)
+
+    # ------------------------------------------------------------------
+    # Phase C4 — stage-3 resilience surface
+    # ------------------------------------------------------------------
+
+    @property
+    def circuit_breaker(self) -> CircuitBreaker:
+        """The breaker guarding this loop's connector (Phase C4).
+
+        Exposed so operators and tests can read ``stats()`` / ``state``
+        and call ``reset()``; the loop itself only calls ``call()``.
+        """
+        return self._circuit_breaker
+
+    @property
+    def connector_backoff(self) -> BackoffConfig:
+        """The bounded in-turn retry policy for the connector (Phase C4)."""
+        return self._connector_backoff
+
+    def _call_connector_with_backoff(self, messages: list[dict[str, str]]) -> str:
+        """One breaker-visible connector call: bounded retries within the turn.
+
+        Every connector exception is treated as potentially transient
+        for the bounded attempts (the breaker, not this loop, decides
+        across turns whether the dependency is down).  After the final
+        attempt the last exception propagates to the breaker, which
+        counts the turn as one failure.  The attempt count is the
+        config's ``max_attempts`` — bounded by construction, never an
+        unbounded loop.
+        """
+        cfg = self._connector_backoff
+        last_exc: Exception | None = None
+        for attempt in range(cfg.max_attempts):
+            try:
+                return self._connector.chat(messages)
+            except Exception as exc:  # noqa: BLE001 — any connector error may be transient
+                last_exc = exc
+                if attempt < cfg.max_attempts - 1:
+                    self._backoff_sleeper(cfg.delay_for(attempt))
+        assert last_exc is not None  # max_attempts >= 1 is config-validated
+        raise last_exc
+
+    def _fallback_system_prompt(self) -> str:
+        """The smallest honest system prompt (Phase C4 stage-2 fallback).
+
+        Base instructions + persona only — no world data block, since
+        assembling that block is what failed.  Mirrors the persona
+        handling of ``PromptBuilder.build_system_prompt``.
+        """
+        base = getattr(self._prompt_builder, "base_instructions", None)
+        if not base:
+            base = getattr(self._prompt_builder, "_base", None) or (
+                "You are a character in a Norse-inspired story world. "
+                "Stay in character and answer based solely on the world "
+                "state provided."
+            )
+        parts: list[str] = [base]
+        if self._persona_name:
+            parts.append(f"\nYou are {self._persona_name}.")
+        if self._persona_notes:
+            parts.append(f"Character notes: {self._persona_notes}")
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # Main API
@@ -222,27 +344,69 @@ class TurnLoop:
             packet = self._degraded_packet()
         logger.debug("[turn_id=%s] stage 1: context packet ready", turn_id)
 
-        # 2. Build prompt + messages
+        # 2. Build prompt + messages — degrade to the smallest honest
+        #    prompt on failure (Phase C4, following stage 1's precedent):
+        #    base instructions + persona as the system prompt, the history
+        #    snapshot and the user's input assembled directly, and the
+        #    turn continues to the connector.
         logger.debug("[turn_id=%s] stage 2: building prompt", turn_id)
-        system_prompt = self._prompt_builder.build_system_prompt(
-            packet,
-            persona_name=self._persona_name,
-            persona_notes=self._persona_notes,
-        )
         with self._history_lock:
             trimmed_history = self._history[-(self._history_limit * 2):]
-        messages = self._prompt_builder.build_messages(
-            system_prompt, trimmed_history, user_input
-        )
+        try:
+            system_prompt = self._prompt_builder.build_system_prompt(
+                packet,
+                persona_name=self._persona_name,
+                persona_notes=self._persona_notes,
+            )
+            messages = self._prompt_builder.build_messages(
+                system_prompt, trimmed_history, user_input
+            )
+        except Exception as exc:  # noqa: BLE001 — resilience: isolate stage 2
+            logger.warning(
+                "[turn_id=%s] prompt stage failed (%s: %s) — degrading to "
+                "base-instructions prompt",
+                turn_id, type(exc).__name__, exc,
+            )
+            stage_errors.append(f"build_prompt: {type(exc).__name__}: {exc}")
+            system_prompt = self._fallback_system_prompt()
+            messages = [
+                {"role": "system", "content": system_prompt},
+                *trimmed_history,
+                {"role": "user", "content": user_input},
+            ]
         logger.debug("[turn_id=%s] stage 2: prompt ready", turn_id)
 
-        # 3. Generate
+        # 3. Generate — through the circuit breaker with bounded in-turn
+        #    backoff (Phase C4).  ANY connector exception degrades the
+        #    turn exactly as OllamaUnavailableError did before C4; an
+        #    open circuit fails fast without calling the connector.
         logger.debug("[turn_id=%s] stage 3: generating response", turn_id)
         error: str | None = None
         try:
-            response_text = self._connector.chat(messages)
-        except OllamaUnavailableError as exc:
-            response_text = "[Ollama unavailable — cannot generate response]"
+            response_text = self._circuit_breaker.call(
+                self._call_connector_with_backoff, messages
+            )
+        except CircuitOpenError as exc:
+            logger.warning(
+                "[turn_id=%s] connector circuit open (%s) — failing fast, "
+                "connector not called",
+                turn_id, exc,
+            )
+            stage_errors.append(
+                f"generate_response: {type(exc).__name__}: {exc}"
+            )
+            response_text = CONNECTOR_UNAVAILABLE_RESPONSE
+            error = str(exc)
+        except Exception as exc:  # noqa: BLE001 — resilience: isolate stage 3
+            logger.warning(
+                "[turn_id=%s] connector stage failed after bounded retries "
+                "(%s: %s) — degrading response",
+                turn_id, type(exc).__name__, exc,
+            )
+            stage_errors.append(
+                f"generate_response: {type(exc).__name__}: {exc}"
+            )
+            response_text = CONNECTOR_UNAVAILABLE_RESPONSE
             error = str(exc)
         logger.debug("[turn_id=%s] stage 3: response ready", turn_id)
 

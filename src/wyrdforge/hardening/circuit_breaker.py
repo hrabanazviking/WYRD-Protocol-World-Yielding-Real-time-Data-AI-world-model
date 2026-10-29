@@ -61,6 +61,11 @@ class CircuitBreaker:
                            half-open circuit (>= 1). A single failed probe
                            re-opens the circuit immediately.
         name:              Optional label for logs/stats.
+        clock:             Optional monotonic clock source (defaults to
+                           ``time.monotonic``). Injectable following the
+                           repo's wall-source precedent (Phase B5) so
+                           tests can advance the recovery timeout
+                           without real waiting (Phase C4).
 
     Any exception raised by the wrapped callable counts as a failure —
     the breaker does not classify error types; use the ``retryable=``
@@ -75,6 +80,7 @@ class CircuitBreaker:
         reset_timeout: float = 30.0,
         half_open_probes: int = 1,
         name: Optional[str] = None,
+        clock: Optional[Callable[[], float]] = None,
     ) -> None:
         if isinstance(failure_threshold, bool) or not isinstance(
             failure_threshold, int
@@ -95,6 +101,7 @@ class CircuitBreaker:
         self._reset_timeout = float(reset_timeout)
         self._half_open_probes = half_open_probes
         self._name = name or "circuit"
+        self._clock = clock if clock is not None else time.monotonic
 
         self._lock = threading.Lock()
         self._state = CircuitState.CLOSED
@@ -185,13 +192,13 @@ class CircuitBreaker:
         """Timed transition: an open circuit whose reset_timeout has elapsed
         becomes half-open, allowing probe calls through."""
         if self._state is CircuitState.OPEN and self._opened_at is not None:
-            if time.monotonic() - self._opened_at >= self._reset_timeout:
+            if self._clock() - self._opened_at >= self._reset_timeout:
                 self._state = CircuitState.HALF_OPEN
                 self._consecutive_probe_successes = 0
 
     def _trip_open_locked(self) -> None:
         self._state = CircuitState.OPEN
-        self._opened_at = time.monotonic()
+        self._opened_at = self._clock()
         self._consecutive_failures = 0
         self._consecutive_probe_successes = 0
         self._open_count += 1
@@ -210,7 +217,7 @@ class CircuitBreaker:
 
     def _on_failure(self) -> None:
         with self._lock:
-            now = time.monotonic()
+            now = self._clock()
             self._total_failures += 1
             self._last_failure_at = now
             if self._state is CircuitState.HALF_OPEN:
