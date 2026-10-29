@@ -182,6 +182,30 @@ Deliberately unmapped, kept from the original audit: ``ping``,
 the mirror does not watch itself watching), ``probe_recorded``. And
 there are no ``sense_*`` nerve events, ever (see above).
 
+**Phase D6 — the seam, hardened (versioned schema, health, determinism).**
+The translation table above was, until D6, implicit in this module's
+handler map. D6 makes the seam a contract: the feed envelope and the
+event→mutation table are a *versioned schema* (``NERVE_FEED_SCHEMA_NAME``
+/ ``NERVE_FEED_SCHEMA_VERSION`` / ``NERVE_FEED_TRANSLATION_TABLE`` below;
+the prose contract lives in ``docs/specs/verdandi-nerve-feed.md`` and the
+shared fixture in ``tests/fixtures/nerve_feed_contract_v1.json``, which
+the Verðandi repo's own suite can consume unchanged). The shape that has
+always existed — ``{type, data, source?, _seq, _ts, _iso?}`` with no
+schema field — IS schema v1, and it keeps replaying unchanged. An entry
+may declare ``"schema": 1`` explicitly. An entry declaring any other
+version is *quarantined, loudly*: never mapped, never silently
+mis-translated — it is counted, recorded verbatim in
+``bridge.feed_quarantine`` with the reason, and warned on this module's
+logger. Mirror-vs-feed lag is likewise measured, not noticed after the
+fact: :meth:`VerdandiBridge.mirror_health` reports events seen / mapped
+/ unmapped / refused / torn / quarantined plus the newest feed and
+mirror timestamps (and hub sequence numbers, when entries carry them)
+and the lag between them. And the projection doctrine's load-bearing
+claim — same feed window → same mirror — is a pinned test
+(``tests/test_verdandi_seam_hardening.py``): replay is deterministic
+because the bridge builds a fresh world per replay and every handler
+is a pure function of (event, timestamp, ledger).
+
 **Standing rules (Track 6).**
 Incident 2 — the 19:55 mid-edit read: this module is imported by the
 1-minute heartbeat worker. NEVER edit it in place while the worker runs.
@@ -197,6 +221,7 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -222,6 +247,257 @@ SELF_ID = "unnr"
 
 LABEL_LIMIT = 80
 UTTERANCE_LABEL_LIMIT = 260  # anchor label; the component keeps the whole text
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Phase D6: the versioned nerve-feed schema — the seam's contract.
+#
+# The nerve feed (Verðandi → WYRD) has exactly one current shape, and it
+# predates any version field: each JSONL line is an envelope
+#
+#     {"type": <str>, "data": <dict>, "source": <str, optional>,
+#      "_seq": <int, hub sequence>, "_ts": <float, epoch seconds>,
+#      "_iso": <str, optional ISO timestamp>}
+#
+# stamped by Verðandi's nerve hub (nervous_system.py) onto the published
+# event. That shape IS schema version 1 — pinned here, not redesigned:
+# existing feed files keep replaying byte-for-byte as before. An entry
+# may declare its version explicitly under the "schema" key; absence
+# means 1. Any other declared version (newer, older, or malformed) is
+# unsupported: the entry is quarantined loudly (see
+# VerdandiBridge.apply_feed_entry) — never mapped, never silently
+# mis-translated — because a bridge that guesses at a future feed's
+# meaning would be inventing someone else's inner life.
+#
+# The contract surfaces stay exactly the four of roadmap §8: this feed,
+# the registry handshake (the bridge world's identify() in __init__),
+# the nerve socket return path (runa_awareness / hermes_bridge — a
+# different module, untouched), and the mirror projection (summary()).
+# The EventBus never crosses this boundary.
+# ---------------------------------------------------------------------------
+
+#: Name of the feed schema both repos test against.
+NERVE_FEED_SCHEMA_NAME = "wyrd-nerve-feed"
+
+#: Current schema version. The pre-version shape is v1 by definition.
+NERVE_FEED_SCHEMA_VERSION = 1
+
+#: Every version this bridge can honestly translate. Anything else is
+#: quarantined, never guessed at.
+SUPPORTED_NERVE_FEED_SCHEMA_VERSIONS: tuple[int, ...] = (1,)
+
+#: Envelope key under which an entry declares its schema version.
+FEED_SCHEMA_FIELD = "schema"
+
+
+class UnsupportedFeedSchemaError(ValueError):
+    """A nerve-feed entry declared a schema version this bridge cannot
+    honestly translate (or a malformed version). Raised by
+    :func:`validate_feed_entry`; the bridge's feed-entry path catches
+    it and quarantines the entry with this error as the trace."""
+
+
+def feed_schema_version(entry: dict) -> int:
+    """The schema version a feed entry declares — 1 when undeclared.
+
+    Raises :class:`UnsupportedFeedSchemaError` when the declared value
+    is not a positive int (bools included: ``True`` is not version 1).
+    Support is a separate question — see :func:`validate_feed_entry`.
+    """
+    declared = entry.get(FEED_SCHEMA_FIELD, NERVE_FEED_SCHEMA_VERSION)
+    if isinstance(declared, bool) or not isinstance(declared, int) \
+            or declared < 1:
+        raise UnsupportedFeedSchemaError(
+            f"malformed nerve-feed schema version {declared!r} "
+            f"(expected a positive int under {FEED_SCHEMA_FIELD!r})")
+    return declared
+
+
+def validate_feed_entry(entry: Any) -> int:
+    """Validate one raw feed entry against the versioned schema.
+
+    Returns the entry's (supported) schema version. Raises
+    ``ValueError`` for a torn entry (not a dict at all) and
+    :class:`UnsupportedFeedSchemaError` for an entry whose declared
+    version this bridge cannot translate. Envelope *contents* (event
+    type, payload shape) are the apply path's own fail-closed guards,
+    unchanged since before versioning existed.
+    """
+    if not isinstance(entry, dict):
+        raise ValueError(
+            f"torn nerve-feed entry: expected a dict, "
+            f"got {type(entry).__name__}")
+    version = feed_schema_version(entry)
+    if version not in SUPPORTED_NERVE_FEED_SCHEMA_VERSIONS:
+        raise UnsupportedFeedSchemaError(
+            f"unsupported nerve-feed schema version {version} "
+            f"(this bridge supports "
+            f"{list(SUPPORTED_NERVE_FEED_SCHEMA_VERSIONS)} of "
+            f"{NERVE_FEED_SCHEMA_NAME!r})")
+    return version
+
+
+class EventTranslation(StrictModel):
+    """One row of the nerve-feed translation table: how one nerve
+    event type becomes mirror-world state.
+
+    ``handler`` names the ``VerdandiBridge`` method that performs the
+    mutation — the table is the contract, the handler is the
+    implementation, and a pinning test fails loudly if the two ever
+    drift apart. ``anchor_tense`` is the TemporalAnchor tense the
+    mapping creates (``"verdhandi"`` = becoming, ``"urdhr"`` = already
+    past) or ``"none"``. ``belief_subject`` is the self-entity belief
+    subject the mapping writes, or None when it writes no belief
+    (``<wish_id>`` marks the per-event id the subject is built from).
+    ``data_fields`` lists the payload fields the handler reads.
+    """
+
+    event_type: str
+    handler: str
+    mutation: str
+    anchor_tense: Literal["verdhandi", "urdhr", "none"] = "none"
+    belief_subject: str | None = None
+    data_fields: tuple[str, ...] = ()
+
+
+#: The event→mutation translation table, explicit and versioned (D6).
+#: This is the declarative form of the table the module docstring has
+#: always described in prose and ``_build_handlers`` implements; the
+#: seam-hardening tests pin all three against each other.
+NERVE_FEED_TRANSLATION_TABLE: tuple[EventTranslation, ...] = (
+    EventTranslation(
+        event_type="mood_shift", handler="_mood_shift",
+        mutation="verðandi anchor 'mood: …' + belief about the new mood",
+        anchor_tense="verdhandi", belief_subject="unnr:mood",
+        data_fields=("after", "why")),
+    EventTranslation(
+        event_type="wish_made", handler="_wish_made",
+        mutation="belief 'I want: <text>' (observed, 1.0) + verðandi anchor",
+        anchor_tense="verdhandi", belief_subject="wish:<wish_id>",
+        data_fields=("wish_id", "text")),
+    EventTranslation(
+        event_type="wish_pursued", handler="_wish_pursued",
+        mutation="verðandi anchor 'pursuing: <text>'",
+        anchor_tense="verdhandi", data_fields=("text",)),
+    EventTranslation(
+        event_type="wish_fulfilled", handler="_wish_fulfilled",
+        mutation="urðr anchor 'fulfilled: <text>' + belief it is fulfilled",
+        anchor_tense="urdhr", belief_subject="wish:<wish_id>",
+        data_fields=("wish_id", "text")),
+    EventTranslation(
+        event_type="wish_released", handler="_wish_released",
+        mutation="urðr anchor 'released: <text>'",
+        anchor_tense="urdhr", data_fields=("text",)),
+    EventTranslation(
+        event_type="reward", handler="_reward",
+        mutation="belief 'Volmarr showed delight (<trigger>): <note>' "
+                 "(observed, 1.0) + verðandi anchor",
+        anchor_tense="verdhandi", belief_subject="volmarr:delight",
+        data_fields=("trigger", "note")),
+    EventTranslation(
+        event_type="shadow", handler="_shadow",
+        mutation="verðandi anchor 'shadow: <signal>'",
+        anchor_tense="verdhandi", data_fields=("signal",)),
+    EventTranslation(
+        event_type="joy_struck", handler="_joy_struck",
+        mutation="verðandi anchor 'joy: <what>'",
+        anchor_tense="verdhandi", data_fields=("what", "note")),
+    EventTranslation(
+        event_type="utterance", handler="_utterance",
+        mutation="verðandi anchor '<speaker> said: …' + UtteranceComponent "
+                 "holding the full text and named emotions (+ atmosphere "
+                 "belief when emotions are named)",
+        anchor_tense="verdhandi", belief_subject="emotional_atmosphere",
+        data_fields=("speaker", "text", "emotion")),
+    EventTranslation(
+        event_type="emote", handler="_emote",
+        mutation="verðandi anchor '<speaker> <emote> (<emotions>)' + the "
+                 "emotional_atmosphere belief rewritten (observed, 0.9)",
+        anchor_tense="verdhandi", belief_subject="emotional_atmosphere",
+        data_fields=("speaker", "emote", "emotion")),
+    EventTranslation(
+        event_type="work_started", handler="_work_started",
+        mutation="verðandi anchor 'work began: …'",
+        anchor_tense="verdhandi", data_fields=("kind", "note")),
+    EventTranslation(
+        event_type="work_finished", handler="_work_finished",
+        mutation="urðr anchor 'work <outcome>: …'",
+        anchor_tense="urdhr", data_fields=("kind", "outcome")),
+    EventTranslation(
+        event_type="job_start", handler="_job_start",
+        mutation="verðandi anchor 'job started: …'",
+        anchor_tense="verdhandi", data_fields=("job_id",)),
+    EventTranslation(
+        event_type="job_end", handler="_job_end",
+        mutation="urðr anchor 'job ended: …'",
+        anchor_tense="urdhr", data_fields=("job_id", "summary")),
+    EventTranslation(
+        event_type="mythic_law_breach", handler="_mythic_law_breach",
+        mutation="verðandi anchor 'law breach: <law> (<file>)'",
+        anchor_tense="verdhandi", data_fields=("law", "file")),
+    EventTranslation(
+        event_type="arc_opened", handler="_arc_opened",
+        mutation="verðandi anchor 'arc opened: …'",
+        anchor_tense="verdhandi", data_fields=("signal", "note")),
+    EventTranslation(
+        event_type="arc_closed", handler="_arc_closed",
+        mutation="urðr anchor 'arc closed: …'",
+        anchor_tense="urdhr", data_fields=("arc_id",)),
+    EventTranslation(
+        event_type="entity.relationship_updated",
+        handler="_relationship_updated",
+        mutation="verðandi anchor 'bond: <entity> is <status> (trust …)'",
+        anchor_tense="verdhandi",
+        data_fields=("entity_id", "status", "trust")),
+    EventTranslation(
+        event_type="self_recognized", handler="_self_recognized",
+        mutation="verðandi anchor 'self-recognition: n/m aligned'",
+        anchor_tense="verdhandi", data_fields=("verdicts", "note")),
+    EventTranslation(
+        event_type="self_reflection", handler="_self_reflection",
+        mutation="reflection component on reflection:<seq> (thought "
+                 "verbatim) + verðandi anchor + self-understanding belief "
+                 "(inferred, 0.8); depth ≥ 2, empty thoughts, 24h "
+                 "duplicates and seq collisions are refused",
+        anchor_tense="verdhandi", belief_subject="unnr:self-understanding",
+        data_fields=("thought", "about", "depth", "seq")),
+)
+
+_TRANSLATION_BY_TYPE: dict[str, EventTranslation] = {
+    t.event_type: t for t in NERVE_FEED_TRANSLATION_TABLE}
+
+#: Feed event types deliberately NOT mapped (module docstring gives the
+#: per-type reasons): routine noise, the runner's own witness, and the
+#: consciousness watch's own output — the mirror does not watch itself
+#: watching. They return None, change nothing, and are counted as
+#: unmapped in mirror_health().
+DELIBERATELY_UNMAPPED_FEED_TYPES: tuple[str, ...] = (
+    "ping",
+    "entity.heartbeat",
+    "wyrd_mirror_synced",
+    "wyrd_divergence",
+    "wyrd_divergence_resolved",
+    "probe_recorded",
+)
+
+#: Deliberately unmapped type families, by prefix: retired telegram
+#: events and the game engines that keep their own logs.
+DELIBERATELY_UNMAPPED_FEED_PREFIXES: tuple[str, ...] = (
+    "telegram_", "game_", "ttrpg_")
+
+
+def translation_for(event_type: str) -> EventTranslation | None:
+    """The translation-table row for an event type, or None when the
+    type is not part of the versioned schema's mapping."""
+    return _TRANSLATION_BY_TYPE.get(event_type)
+
+
+def is_deliberately_unmapped(event_type: str) -> bool:
+    """True when the schema deliberately leaves this type unmapped."""
+    return event_type in DELIBERATELY_UNMAPPED_FEED_TYPES or \
+        event_type.startswith(DELIBERATELY_UNMAPPED_FEED_PREFIXES)
 
 
 @register_component
@@ -501,6 +777,21 @@ class VerdandiBridge:
         # counter replaces it. Unique within this bridge's run, which
         # is the only scope the ids ever live in.
         self._anchor_seq: int = 0
+        # Phase D6: mirror-lag health bookkeeping (see mirror_health).
+        # Counters only — the mirror's honesty made measurable; they
+        # never influence a mapping decision. ``feed_quarantine`` holds
+        # the verbatim trace of every entry refused on schema grounds.
+        self._feed_seen: int = 0
+        self._feed_mapped: int = 0
+        self._feed_unmapped: int = 0
+        self._feed_refused: int = 0
+        self._feed_torn: int = 0
+        self._feed_quarantined: int = 0
+        self._feed_newest_ts: float | None = None
+        self._feed_mirrored_ts: float | None = None
+        self._feed_newest_seq: int | None = None
+        self._feed_mirrored_seq: int | None = None
+        self.feed_quarantine: list[dict] = []
 
     def set_ledger(self, ledger: dict | None) -> None:
         """Point the bridge at the runner's ledger (accrual reference)."""
@@ -587,19 +878,149 @@ class VerdandiBridge:
         over-size payloads are all refused (never coerced, never
         crashed). Falsy data (None) keeps the historical ``{}`` path.
         """
+        # Phase D6: every presented event is counted for
+        # mirror_health(); the counting never changes a decision.
+        self._feed_seen += 1
+        tsf: float | None = None
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            tsf = float(ts)
+            if self._feed_newest_ts is None or tsf > self._feed_newest_ts:
+                self._feed_newest_ts = tsf
         if not isinstance(event_type, str):
+            self._feed_refused += 1
             return None
         handler = self._event_handlers.get(event_type)
         if handler is None:
+            self._feed_unmapped += 1
             return None
         guarded = self._guard_data(data)
         if guarded is None:
+            self._feed_refused += 1
             return None
         try:
             at = _utc(ts)
         except (TypeError, ValueError, OverflowError, OSError):
             at = _utc(None)
-        return handler(guarded, at)
+        result = handler(guarded, at)
+        if result is not None:
+            self._feed_mapped += 1
+            if tsf is not None and (self._feed_mirrored_ts is None
+                                    or tsf > self._feed_mirrored_ts):
+                self._feed_mirrored_ts = tsf
+        else:
+            # A mapped type whose handler refused this instance (the
+            # self-reflection guards: depth, dedup, seq collision,
+            # empty thought). Counted, never hidden.
+            self._feed_refused += 1
+        return result
+
+    def apply_feed_entry(self, entry: Any) -> str | None:
+        """Apply one raw nerve-feed *entry* (the whole envelope dict)
+        under the versioned schema.
+
+        This is the schema-aware door; :meth:`apply_event` remains the
+        per-event door the runner has always used, unchanged. An entry
+        whose declared schema version is unsupported is quarantined:
+        not mapped, recorded verbatim in ``feed_quarantine`` with the
+        refusal reason, warned on the module logger, and counted in
+        :meth:`mirror_health` — loudly, never silently mis-translated.
+        A torn (non-dict) entry is counted as torn and refused, the
+        same degrade the feed has always had, now measured.
+        """
+        if not isinstance(entry, dict):
+            self._feed_seen += 1
+            self._feed_torn += 1
+            return None
+        # The feed's own position markers advance the lag watermarks
+        # even for entries that end up quarantined — the feed moved;
+        # the mirror did not. That gap is exactly the lag.
+        seq = entry.get("_seq")
+        seq_i: int | None = seq if isinstance(seq, int) \
+            and not isinstance(seq, bool) else None
+        if seq_i is not None and (self._feed_newest_seq is None
+                                  or seq_i > self._feed_newest_seq):
+            self._feed_newest_seq = seq_i
+        ts = entry.get("_ts")
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            tsf = float(ts)
+            if self._feed_newest_ts is None or tsf > self._feed_newest_ts:
+                self._feed_newest_ts = tsf
+        try:
+            validate_feed_entry(entry)
+        except UnsupportedFeedSchemaError as exc:
+            self._feed_seen += 1
+            self._feed_quarantined += 1
+            record = {
+                "reason": str(exc),
+                "declared_schema": entry.get(FEED_SCHEMA_FIELD),
+                "event_type": entry.get("type"),
+                "seq": seq_i,
+                "ts": ts if isinstance(ts, (int, float)) else None,
+                "entry": entry,
+            }
+            self.feed_quarantine.append(record)
+            logger.warning(
+                "verdandi_bridge: quarantined nerve-feed entry "
+                "(seq=%s, type=%r): %s",
+                seq_i, entry.get("type"), exc)
+            return None
+        result = self.apply_event(entry.get("type", ""),
+                                  entry.get("data", {}),
+                                  entry.get("_ts"))
+        if result is not None and seq_i is not None and (
+                self._feed_mirrored_seq is None
+                or seq_i > self._feed_mirrored_seq):
+            self._feed_mirrored_seq = seq_i
+        return result
+
+    def mirror_health(self) -> dict[str, Any]:
+        """Mirror-vs-feed health, as measured values a caller can poll
+        (the EventBus.snapshot() / store count_*() house style: a
+        plain dict of numbers, not a log line).
+
+        ``mirror_lag_seconds`` is the gap between the newest feed
+        timestamp this bridge has *seen* and the newest it has
+        *mirrored* (mapped) — None until both exist.
+        ``mirror_lag_events`` is the same gap in hub sequence numbers,
+        present only when entries carried ``_seq`` (feed-file replay
+        does; direct apply_event calls do not). An entry that was
+        seen but not mirrored — unmapped, refused, torn, or
+        quarantined — holds the mirror's watermark back, so lag names
+        exactly the events the mirror is behind by.
+        """
+        lag_seconds: float | None = None
+        if self._feed_newest_ts is not None \
+                and self._feed_mirrored_ts is not None:
+            lag_seconds = max(
+                0.0, self._feed_newest_ts - self._feed_mirrored_ts)
+        lag_events: int | None = None
+        if self._feed_newest_seq is not None \
+                and self._feed_mirrored_seq is not None:
+            lag_events = self._feed_newest_seq - self._feed_mirrored_seq
+        return {
+            "world_id": WORLD_ID,
+            "reality": self.world.identity.reality,
+            "schema": NERVE_FEED_SCHEMA_NAME,
+            "schema_version": NERVE_FEED_SCHEMA_VERSION,
+            "feed_events_seen": self._feed_seen,
+            "feed_events_mapped": self._feed_mapped,
+            "feed_events_unmapped": self._feed_unmapped,
+            "feed_events_refused": self._feed_refused,
+            "feed_events_torn": self._feed_torn,
+            "feed_events_quarantined": self._feed_quarantined,
+            "quarantined_entries": len(self.feed_quarantine),
+            "newest_feed_at": (_utc(self._feed_newest_ts).isoformat()
+                               if self._feed_newest_ts is not None
+                               else None),
+            "newest_mirrored_at": (
+                _utc(self._feed_mirrored_ts).isoformat()
+                if self._feed_mirrored_ts is not None else None),
+            "mirror_lag_seconds": lag_seconds,
+            "newest_feed_seq": self._feed_newest_seq,
+            "newest_mirrored_seq": self._feed_mirrored_seq,
+            "mirror_lag_events": lag_events,
+            "entities": self.world.entity_count(),
+        }
 
     @staticmethod
     def _guard_data(data: Any) -> dict | None:
@@ -658,9 +1079,17 @@ class VerdandiBridge:
     def build_from_events(self, events: list[dict]) -> "VerdandiBridge":
         """Replay a sequence of nerve-feed entries into a fresh bridge.
 
-        Torn entries (non-dict lines) are skipped, never crashed on —
-        the feed is an external source and a torn line is refused the
-        same way a malformed event is.
+        Pure projection (Phase D6 pins it as a determinism test): the
+        same entries always build the same mirror, because the world
+        is rebuilt fresh here and every handler is a function of the
+        entry alone. Entries route through :meth:`apply_feed_entry`,
+        so the versioned schema is enforced on replay exactly as on
+        the live path: unsupported-schema entries are quarantined on
+        the fresh bridge (see its ``feed_quarantine`` /
+        :meth:`mirror_health`), and torn entries (non-dict lines) are
+        counted and skipped, never crashed on — the feed is an
+        external source and a torn line is refused the same way a
+        malformed event is.
         """
         fresh = VerdandiBridge()
         # T3 SLICE6-F1: replay is a batch — it allocates tens of
@@ -672,11 +1101,7 @@ class VerdandiBridge:
         gc.disable()
         try:
             for entry in events:
-                if not isinstance(entry, dict):
-                    continue
-                fresh.apply_event(entry.get("type", ""),
-                                  entry.get("data", {}),
-                                  entry.get("_ts"))
+                fresh.apply_feed_entry(entry)
         finally:
             gc.enable()
         return fresh
