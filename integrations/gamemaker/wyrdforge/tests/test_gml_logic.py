@@ -1,3 +1,13 @@
+# ===========================================================================
+# MIRROR / LOGIC TESTS - honestly labelled in E1 (Phase E, 2026-10-29).
+# This file does NOT execute the shipped code. It re-implements the
+# shipped logic in Python and tests the copy: drift between this copy
+# and the shipped source is UNDETECTABLE by this suite. Its value is
+# as a logic specification. The shipped code itself is classified in
+# integrations/honesty-manifest.json - read it before quoting any
+# test count from this file as evidence the integration works.
+# ===========================================================================
+
 """
 Tests for WyrdForge GameMaker Studio 2 integration (Phase 11C).
 Python equivalents of GML pure functions tested here as specification.

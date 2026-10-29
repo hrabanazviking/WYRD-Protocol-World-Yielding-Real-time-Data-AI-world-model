@@ -1,3 +1,15 @@
+/*
+ * ===========================================================================
+ * MIRROR / LOGIC TESTS - honestly labelled in E1 (Phase E, 2026-10-29).
+ * This file does NOT execute the shipped code. It inlines copies of
+ * the shipped functions and tests the copies: drift between a copy
+ * and the shipped source is UNDETECTABLE by this suite. The honest
+ * harness beside it (honest.test.mjs) loads the shipped file verbatim
+ * and supersedes this file; this file is kept only as a logic
+ * reference. Classifications: integrations/honesty-manifest.json.
+ * ===========================================================================
+ */
+
 /**
  * Tests for WyrdForge Construct 3 addon (Phase 11D).
  *

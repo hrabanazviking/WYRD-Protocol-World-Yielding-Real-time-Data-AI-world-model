@@ -1,0 +1,300 @@
+{
+  "classifications": {
+    "experimental-host-untested": "EXPERIMENTAL: no test anywhere executes the shipped code. Any Python 'mirror' tests re-implement the logic in Python and test the copy \u2014 drift between the copy and the shipped code is undetectable. The shipped code needs its host engine/runtime (or an absent compiler) to execute at all.",
+    "genuine-suite-elsewhere": "A real test suite exists that compiles/runs against the shipped source, but it needs a toolchain not present on every machine (e.g. dotnet SDK, npm-installed dev dependencies). It is genuine where that toolchain exists; it was NOT executed in the E1 session unless the entry says so.",
+    "honest-executed": "Tests in this repo execute the shipped code itself (imported, loaded verbatim, or compiled from the shipped source) with a toolchain that exists in a normal dev environment; the harness path is in the entry."
+  },
+  "integrations": {
+    "construct3": {
+      "classification": "honest-executed",
+      "executed_here": "node --experimental-vm-modules --test: 7 passed (E1 session; also passes without the flag - it loads via vm.Script)",
+      "honest_harness": "integrations/construct3/wyrdforge/tests/honest.test.mjs",
+      "kind": "integration",
+      "language": "JavaScript (Construct 3 runtime)",
+      "previous_tests": "Jest file inlining copies of the helpers (tests a copy). Relabelled in E1; the honest harness supersedes it.",
+      "scope": "Covers the runtime instance (the logic core) via the shipped file's own WyrdForgeHelpers surface and Instance class, with globalThis.C3 stubbed. The editor-side plugin.js files need the C3 editor SDK and are not executed.",
+      "shipped": [
+        "integrations/construct3/wyrdforge/c3runtime/instance.js"
+      ]
+    },
+    "cryengine": {
+      "classification": "honest-executed",
+      "executed_here": "g++ -std=c++17 compile + run: 21 checks passed (E1 session)",
+      "honest_harness": "integrations/cryengine/wyrdforge/tests/honest/WyrdHelpersHonestTest.cpp",
+      "kind": "integration",
+      "language": "C++ (CryEngine plugin)",
+      "previous_tests": "Python mirror tests (test a Python copy). Kept and relabelled as mirror/logic tests in E1.",
+      "scope": "Covers WyrdHelpers (pure standard C++, no CryEngine dependency \u2014 its own header says so) compiled with g++ from the shipped source. The plugin glue WyrdPlugin.cpp needs CryEngine and is NOT executed; the integration as a whole remains host-untested in-engine.",
+      "shipped": [
+        "integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdHelpers.cpp"
+      ]
+    },
+    "defold": {
+      "classification": "experimental-host-untested",
+      "executed_here": "Not executed. Python mirror suite: 46 passed as mirror/logic tests (E1 session).",
+      "honest_harness": null,
+      "kind": "integration",
+      "language": "C++ native extension + Lua (Defold)",
+      "previous_tests": "Python mirror tests of the C++ pure functions (test a copy). Kept and relabelled in E1.",
+      "scope": "The C++ needs the Defold SDK (dmsdk/sdk.h); the Lua needs a Lua/Defold host. Neither exists on this machine (no dmsdk, no lua interpreter).",
+      "shipped": [
+        "integrations/defold/wyrdforge/src/wyrdforge.cpp",
+        "integrations/defold/wyrdforge/lua/wyrdforge.lua"
+      ]
+    },
+    "dndbeyond": {
+      "classification": "honest-executed",
+      "executed_here": "node --experimental-vm-modules --test: 7 passed (E1 session)",
+      "honest_harness": "integrations/dndbeyond/wyrdforge/tests/honest.test.mjs",
+      "kind": "integration",
+      "language": "JavaScript (browser extension)",
+      "previous_tests": "Jest file inlining copies of the client and helpers (tests a copy). Relabelled in E1; the honest harness supersedes it.",
+      "scope": "Covers the shipped core wyrdforge.js (by its own header: no DOM/browser dependencies; shared by content.js, popup.js, background.js). The host scripts themselves (chrome.* / DOM) are not executed.",
+      "shipped": [
+        "integrations/dndbeyond/wyrdforge/wyrdforge.js"
+      ]
+    },
+    "fgu": {
+      "classification": "genuine-suite-elsewhere",
+      "executed_here": "Not executed here (no dotnet).",
+      "honest_harness": "integrations/fgu/WyrdForge.FGU.Tests (xUnit, ProjectReference to the shipped project)",
+      "kind": "integration",
+      "language": "C# (Fantasy Grounds Unity)",
+      "previous_tests": "The xUnit suite itself is genuine: its csproj ProjectReferences the shipped project, so it compiles against the real source.",
+      "scope": "Needs the dotnet SDK, which this machine does not have. Genuine where dotnet exists.",
+      "shipped": [
+        "integrations/fgu/WyrdForge.FGU/FGUWyrdBridge.cs"
+      ]
+    },
+    "foundry": {
+      "classification": "honest-executed",
+      "executed_here": "node --experimental-vm-modules --test: 9 passed (E1 session)",
+      "honest_harness": "integrations/foundry/wyrdforge/tests/honest.test.mjs",
+      "kind": "integration",
+      "language": "JavaScript (Foundry VTT module)",
+      "previous_tests": "Jest file inlining copies of the client and helpers (tests a copy). Relabelled in E1; the honest harness supersedes it.",
+      "scope": "The shipped ES module is loaded verbatim with the Foundry host globals (Hooks, game, ui, ChatMessage, document) stubbed; all exported functions and the WyrdClient are exercised against a stubbed fetch.",
+      "shipped": [
+        "integrations/foundry/wyrdforge/scripts/wyrdforge.js"
+      ]
+    },
+    "gamemaker": {
+      "classification": "experimental-host-untested",
+      "executed_here": "Not executed. Python mirror suite: 23 passed as mirror/logic tests (E1 session).",
+      "honest_harness": null,
+      "kind": "integration",
+      "language": "GML (GameMaker Studio 2)",
+      "previous_tests": "Python mirror tests (test a copy). Kept and relabelled in E1.",
+      "scope": "GML executes only inside GameMaker, which is not available here.",
+      "shipped": [
+        "integrations/gamemaker/wyrdforge/scripts/wyrd_bridge.gml"
+      ]
+    },
+    "godot": {
+      "classification": "experimental-host-untested",
+      "executed_here": "Not executed. Python mirror suite: 25 passed as mirror/logic tests (E1 session).",
+      "honest_harness": null,
+      "kind": "integration",
+      "language": "GDScript (Godot 4 addon)",
+      "previous_tests": "Python mirror tests (test a copy). Kept and relabelled in E1.",
+      "scope": "GDScript executes only inside Godot; no godot binary exists on this machine.",
+      "shipped": [
+        "integrations/godot/wyrdforge/addons/wyrdforge/wyrd_bridge.gd"
+      ]
+    },
+    "minecraft": {
+      "classification": "experimental-host-untested",
+      "executed_here": "Not executed. Python mirror suite: 74 passed as mirror/logic tests (E1 session).",
+      "honest_harness": null,
+      "kind": "integration",
+      "language": "Java (Fabric mod)",
+      "previous_tests": "Python mirror tests (test a copy). Kept and relabelled in E1.",
+      "scope": "Java needs a JDK (none on this machine) and the mod needs the Fabric/Minecraft runtime to execute in-host.",
+      "shipped": [
+        "integrations/minecraft/wyrdforge/src/main/java/com/wyrdforge/WyrdHttpClient.java"
+      ]
+    },
+    "monogame": {
+      "classification": "genuine-suite-elsewhere",
+      "executed_here": "Not executed here (no dotnet).",
+      "honest_harness": "integrations/monogame/wyrdforge/WyrdForge.MonoGame.Tests (xUnit, ProjectReference to the shipped project)",
+      "kind": "integration",
+      "language": "C# (MonoGame/FNA)",
+      "previous_tests": "The xUnit suite itself is genuine (ProjectReference to the shipped project).",
+      "scope": "Needs the dotnet SDK, which this machine does not have. Genuine where dotnet exists.",
+      "shipped": [
+        "integrations/monogame/wyrdforge/WyrdForge.MonoGame/WyrdSystem.cs"
+      ]
+    },
+    "o3de": {
+      "classification": "experimental-host-untested",
+      "executed_here": "Not executed. Python mirror suite: 60 passed as mirror/logic tests (E1 session).",
+      "honest_harness": null,
+      "kind": "integration",
+      "language": "C++ (O3DE Gem)",
+      "previous_tests": "Python mirror tests (test a copy). Kept and relabelled in E1.",
+      "scope": "The helpers use AZStd/AzCore types and the component needs the O3DE runtime; neither can be compiled or run without O3DE.",
+      "shipped": [
+        "integrations/o3de/wyrdforge/Code/Source/WyrdSystemComponent.cpp"
+      ]
+    },
+    "opensim": {
+      "classification": "genuine-suite-elsewhere",
+      "executed_here": "Not executed here (no dotnet).",
+      "honest_harness": "integrations/opensim/wyrdforge/WyrdForge.OpenSim.Tests (xUnit, ProjectReference to the shipped project)",
+      "kind": "integration",
+      "language": "C# + LSL (OpenSim)",
+      "previous_tests": "The xUnit suite itself is genuine for the C# side (ProjectReference). The LSL script has no tests anywhere.",
+      "scope": "C# suite needs the dotnet SDK (absent here). The LSL side is host-untested in-world.",
+      "shipped": [
+        "integrations/opensim/wyrdforge/WyrdForge.OpenSim/WyrdForgeRegionModule.cs"
+      ]
+    },
+    "owlbear": {
+      "classification": "honest-executed",
+      "executed_here": "node --experimental-vm-modules --test: 7 passed (E1 session). Observed: shipped renderPanel escapes only '<', not '>' - pinned as-is.",
+      "honest_harness": "integrations/owlbear/wyrdforge/tests/honest.test.mjs",
+      "kind": "integration",
+      "language": "JavaScript (Owlbear Rodeo extension)",
+      "previous_tests": "Jest file inlining copies (tests a copy). Relabelled in E1; the honest harness supersedes it.",
+      "scope": "The shipped ES module is loaded verbatim (its OBR bootstrap is guarded) and its exported helpers, panel state machine, renderer, and WyrdClient are exercised.",
+      "shipped": [
+        "integrations/owlbear/wyrdforge/wyrdforge.js"
+      ]
+    },
+    "pygame": {
+      "classification": "honest-executed",
+      "executed_here": "pytest: 73 passed (E1 session)",
+      "honest_harness": "integrations/pygame/wyrdforge/tests/test_wyrdforge.py",
+      "kind": "integration",
+      "language": "Python (pygame bridge)",
+      "previous_tests": "The pytest suite itself is genuine: it imports the shipped modules directly (HTTP mocked). No mirror was ever involved.",
+      "scope": "Runs with the integration's module directory on PYTHONPATH (its package __init__ uses flat imports \u2014 a pre-existing quirk, recorded here).",
+      "shipped": [
+        "integrations/pygame/wyrdforge/wyrd_pygame_client.py",
+        "integrations/pygame/wyrdforge/wyrd_pygame_helpers.py",
+        "integrations/pygame/wyrdforge/wyrd_pygame_loop.py"
+      ]
+    },
+    "roblox": {
+      "classification": "experimental-host-untested",
+      "executed_here": "Not executed. Python mirror suite: 63 passed as mirror/logic tests (E1 session).",
+      "honest_harness": null,
+      "kind": "integration",
+      "language": "Luau (Roblox)",
+      "previous_tests": "Python mirror tests (test a copy). Kept and relabelled in E1.",
+      "scope": "Luau executes only inside Roblox; no Luau interpreter exists on this machine.",
+      "shipped": [
+        "integrations/roblox/wyrdforge/WyrdMapper.lua"
+      ]
+    },
+    "roll20": {
+      "classification": "honest-executed",
+      "executed_here": "node --experimental-vm-modules --test: 9 passed (E1 session)",
+      "honest_harness": "integrations/roll20/wyrdforge/tests/honest.test.mjs",
+      "kind": "integration",
+      "language": "JavaScript (Roll20 API script)",
+      "previous_tests": "Jest file inlining copies (tests a copy). Relabelled in E1; the honest harness supersedes it.",
+      "scope": "The shipped ES module is loaded verbatim (its Roll20 entry point is guarded) and its exported config/command/HTTP helpers are exercised against a mock http module.",
+      "shipped": [
+        "integrations/roll20/wyrdforge/wyrdforge.js"
+      ]
+    },
+    "rpgmaker": {
+      "classification": "honest-executed",
+      "executed_here": "node --experimental-vm-modules --test: 7 passed (E1 session; also passes without the flag - it loads via vm.Script)",
+      "honest_harness": "integrations/rpgmaker/wyrdforge/tests/honest.test.mjs",
+      "kind": "integration",
+      "language": "JavaScript (RPG Maker MZ/MV plugin)",
+      "previous_tests": "Jest file inlining copies (tests a copy). Relabelled in E1; the honest harness supersedes it.",
+      "scope": "The shipped IIFE plugin is executed verbatim with PluginManager / Game_Interpreter / window stubbed; its own window.WyrdForge namespace, MZ command registration, and MV prototype patch are exercised.",
+      "shipped": [
+        "integrations/rpgmaker/wyrdforge/WyrdForge.js"
+      ]
+    },
+    "sillytavern": {
+      "classification": "honest-executed",
+      "executed_here": "node --experimental-vm-modules --test: 6 passed (E1 session)",
+      "honest_harness": "integrations/sillytavern/wyrdforge/tests/honest.test.mjs",
+      "kind": "integration",
+      "language": "JavaScript (SillyTavern extension)",
+      "previous_tests": "Jest file inlining/extracting copies (tests a copy). Relabelled in E1; the honest harness supersedes it.",
+      "scope": "The shipped ES module is loaded verbatim; its two SillyTavern host imports (script.js / extensions.js, absent outside an ST install) are satisfied by minimal stub modules via the vm module linker, and jQuery is stubbed so no UI builds. Exported query/health/context functions are exercised against a stubbed fetch.",
+      "shipped": [
+        "integrations/sillytavern/wyrdforge/index.js"
+      ]
+    },
+    "unity": {
+      "classification": "genuine-suite-elsewhere",
+      "executed_here": "Not executed here (no dotnet).",
+      "honest_harness": "integrations/unity/wyrdforge/WyrdForge.Unity.Tests (xUnit, Compile Include of the shipped Runtime sources)",
+      "kind": "integration",
+      "language": "C# (Unity package \u2014 plain C# classes, not MonoBehaviours; see E3)",
+      "previous_tests": "The xUnit suite itself is genuine: its csproj Compile-Includes the shipped Runtime/*.cs files, so it compiles the real source.",
+      "scope": "Needs the dotnet SDK (absent here). The suite compiles the plain C# classes; it does not prove behaviour inside Unity (that is E3's host-truth work).",
+      "shipped": [
+        "integrations/unity/wyrdforge/Runtime/WyrdManager.cs"
+      ]
+    },
+    "unreal": {
+      "classification": "experimental-host-untested",
+      "executed_here": "Not executed. Python mirror suite: 61 passed as mirror/logic tests (E1 session).",
+      "honest_harness": null,
+      "kind": "integration",
+      "language": "C++ (Unreal Engine 5 plugin)",
+      "previous_tests": "Python mirror tests (test a copy). Kept and relabelled in E1.",
+      "scope": "The C++ uses UE types (FString/CoreMinimal) and needs the Unreal build toolchain; it has never been compiled.",
+      "shipped": [
+        "integrations/unreal/wyrdforge/Source/WyrdForge/Private/WyrdHelpers.cpp"
+      ]
+    }
+  },
+  "introduced": "E1 (Phase E) \u2014 roadmap section 1.3 / item E1",
+  "manifest": "wyrd-integration-test-honesty/1",
+  "sdks": {
+    "sdk/csharp": {
+      "classification": "genuine-suite-elsewhere",
+      "executed_here": "Not executed here (no dotnet).",
+      "honest_harness": "sdk/csharp/WyrdForge.Client.Tests (xUnit, ProjectReference to the shipped project)",
+      "kind": "sdk",
+      "language": "C# (client SDK)",
+      "previous_tests": "The xUnit suite itself is genuine (ProjectReference).",
+      "scope": "Needs the dotnet SDK, which this machine does not have. Genuine where dotnet exists.",
+      "shipped": [
+        "sdk/csharp/WyrdForge.Client/WyrdClient.cs"
+      ]
+    },
+    "sdk/gdscript": {
+      "classification": "experimental-host-untested",
+      "executed_here": "Not executed. Python mirror suite: 28 passed as mirror/logic tests (E1 session).",
+      "honest_harness": null,
+      "kind": "sdk",
+      "language": "GDScript (Godot addon SDK)",
+      "previous_tests": "Python mirror tests (test a copy). Kept and relabelled in E1.",
+      "scope": "GDScript executes only inside Godot; no godot binary exists on this machine.",
+      "shipped": [
+        "sdk/gdscript/addons/wyrdforge/wyrd_bridge.gd"
+      ]
+    },
+    "sdk/js": {
+      "classification": "genuine-suite-elsewhere",
+      "executed_here": "npm ci + jest (ts-jest): 30 passed (E1 session)",
+      "honest_harness": "sdk/js/tests/client.test.ts (ts-jest, imports the shipped src/)",
+      "kind": "sdk",
+      "language": "TypeScript (JS SDK)",
+      "previous_tests": "The ts-jest suite itself is genuine: it imports the shipped TypeScript source.",
+      "scope": "Needs npm-installed dev dependencies (jest/ts-jest/typescript). Executed in the E1 session after npm ci. A node-alone harness is NOT possible today: the shipped TS uses non-erasable syntax and type-only imports that Node's type stripping/transform cannot elide, and the package build is broken (missing scripts/build-esm.mjs \u2014 that is E2).",
+      "shipped": [
+        "sdk/js/src/client.ts"
+      ]
+    }
+  },
+  "reproduction": {
+    "js_honest_harnesses": "From the repo root, per integration: node --experimental-vm-modules --test integrations/<name>/wyrdforge/tests/honest.test.mjs  (the --experimental-vm-modules flag is REQUIRED for the five harnesses that load the shipped file via vm.SourceTextModule - dndbeyond, foundry, owlbear, roll20, sillytavern; construct3 and rpgmaker load via vm.Script and also pass with the flag, so the flagged form is the one uniform invocation for all seven. Without the flag the five vm-module harnesses fail on vm.SourceTextModule.)",
+    "cryengine_honest_harness": "g++ -std=c++17 -I integrations/cryengine/wyrdforge/Code/WyrdPlugin integrations/cryengine/wyrdforge/tests/honest/WyrdHelpersHonestTest.cpp integrations/cryengine/wyrdforge/Code/WyrdPlugin/WyrdHelpers.cpp -o /tmp/wyrd_cryengine_honest && /tmp/wyrd_cryengine_honest",
+    "sdk_js_suite": "cd sdk/js && npm ci && npx jest  (ts-jest; imports the shipped src/)",
+    "python_mirror_suites": "pytest <path named in the entry's previous_tests / the file itself> - each such file is labelled MIRROR / LOGIC TESTS in its own header; these counts are logic-spec counts, never shipped-code evidence",
+    "pygame_suite": "PYTHONPATH=integrations/pygame/wyrdforge pytest integrations/pygame/wyrdforge/tests/test_wyrdforge.py",
+    "verified": "All executed_here counts in this manifest were re-measured by the E1 completion session on 2026-10-29 (node v24, g++ 13, dedicated campaign venv) and reproduced exactly."
+  }
+}
