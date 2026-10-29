@@ -2,7 +2,16 @@
 
 WyrdHTTPServer exposes a JSON REST API on `http://localhost:8765` by default.
 
-## POST /query
+Since Phase C2 the canonical paths are versioned under `/v1/`
+(`/v1/query`, `/v1/event`, `/v1/world`, `/v1/facts`, `/v1/health`);
+the original unversioned paths below remain as backwards-compatible
+aliases with identical behaviour, and every response carries an
+`X-Wyrd-API-Version: 1` header.  When a bearer token is configured
+(the `auth_token` argument or the `WYRD_API_TOKEN` environment
+variable), every endpoint — health included — requires
+`Authorization: Bearer <token>`; see `docs/security.md`.
+
+## POST /v1/query
 
 Query world context for a character persona.
 
@@ -32,7 +41,7 @@ Query world context for a character persona.
 
 ---
 
-## POST /event
+## POST /v1/event
 
 Push a world event into WYRD memory.
 
@@ -65,7 +74,7 @@ Push a world event into WYRD memory.
 
 ---
 
-## GET /world
+## GET /v1/world
 
 Returns the full world state snapshot.
 
@@ -88,12 +97,12 @@ Returns the full world state snapshot.
 
 ---
 
-## GET /facts
+## GET /v1/facts
 
 Returns canonical facts for a subject.
 
 ```
-GET /facts?subject_id=sigrid
+GET /v1/facts?subject_id=sigrid
 ```
 
 ```json
@@ -106,12 +115,12 @@ GET /facts?subject_id=sigrid
 
 ---
 
-## GET /health
+## GET /v1/health
 
 Health check endpoint.
 
 ```json
-{"status": "ok", "version": "1.0.0"}
+{"status": "ok"}
 ```
 
 ---

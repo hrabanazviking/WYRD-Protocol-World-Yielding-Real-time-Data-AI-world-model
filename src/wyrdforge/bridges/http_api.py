@@ -50,6 +50,7 @@ Typical usage::
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import hmac
 import json
@@ -67,7 +68,7 @@ class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 from typing import Any, Optional
 
-from wyrdforge.bridges.python_rpg import PythonRPGBridge
+from wyrdforge.bridges.python_rpg import BridgeConfig, PythonRPGBridge
 from wyrdforge.hardening.backoff import BackoffConfig
 from wyrdforge.hardening.input_validation import (
     MAX_EVENT_DEPTH,
@@ -626,3 +627,62 @@ class WyrdHTTPServer:
                 self._restart_server()
             except Exception:
                 logger.exception("WyrdHTTPServer watchdog: error during health check")
+
+
+# ---------------------------------------------------------------------------
+# CLI — python -m wyrdforge.bridges.http_api (Phase E5)
+#
+# The documented quickstart entry point, made real.  Before E5 this
+# module had no __main__ entry at all: docs/guides/quickstart.md and
+# docs/index.md named a nonexistent ``wyrdforge.server`` module, and
+# CLAUDE.md's fallback line (``python -m wyrdforge.bridges.http_api``)
+# exited silently doing nothing, because running a module without a
+# ``__main__`` guard is a no-op.  This main() is the fix: the module
+# path the docs name now starts the server it describes.
+# ---------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Start a WyrdHTTPServer over a fresh PythonRPGBridge.
+
+    The bridge is built from :class:`BridgeConfig` with a blank world
+    (the ``from_config`` path the module docstring shows); world
+    content arrives through the API itself, or use the chat/world
+    CLIs (``wyrd-chat`` / ``wyrd-world``) for YAML-loaded worlds.
+    Auth follows the Phase C2 rule: set ``WYRD_API_TOKEN`` to require
+    a bearer token; without one the server runs unauthenticated on
+    the bind address and logs a loud warning saying so.
+    """
+    parser = argparse.ArgumentParser(
+        prog="wyrdforge.bridges.http_api",
+        description="WYRD HTTP API server (WyrdHTTPServer over a PythonRPGBridge).",
+    )
+    parser.add_argument("--host", default="localhost", help="bind address (default: localhost)")
+    parser.add_argument("--port", type=int, default=8765, help="bind port (default: 8765)")
+    parser.add_argument("--world-id", default="wyrd_world", help="logical world id")
+    parser.add_argument(
+        "--db",
+        default="wyrd.db",
+        help="SQLite path for the persistent memory store (default: wyrd.db)",
+    )
+    args = parser.parse_args(argv)
+
+    bridge = PythonRPGBridge.from_config(
+        BridgeConfig(world_id=args.world_id, db_path=args.db)
+    )
+    server = WyrdHTTPServer(bridge, host=args.host, port=args.port)
+    print(
+        f"[WyrdForge] WyrdHTTPServer listening on http://{args.host}:{args.port}",
+        flush=True,
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.shutdown()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

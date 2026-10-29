@@ -9,6 +9,12 @@ dist/
 build/
 .eggs/
 
+# .NET build outputs (compiler output is never source; the Unity
+# test project's bin/ + obj/ trees were tracked despite this rule
+# until Phase E5 untracked them — the files stay on disk)
+bin/
+obj/
+
 # Virtual environments
 venv/
 .venv/

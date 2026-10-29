@@ -211,3 +211,107 @@ def test_quarantine_parsing_edge_cases():
     reason, owner, recheck = _validate_quarantine_body(found[0])
     assert owner == "forge" and recheck == future
     assert "timing" in reason
+
+
+# ---------------------------------------------------------------------------
+# Phase E5 — doc truth: the quickstart and its neighbours must not
+# send a reader to a module, command, or status that does not exist.
+# (E6 widens this into CI; these pins are the local form.)
+# ---------------------------------------------------------------------------
+
+import importlib.util
+import subprocess
+import sys
+
+QUICKSTART = DOCS / "guides" / "quickstart.md"
+DOCS_INDEX = DOCS / "index.md"
+HTTP_API_DOC = DOCS / "api" / "http-api.md"
+CLAUDE = REPO / "CLAUDE.md"
+
+#: User-facing docs whose commands a new reader will copy-paste.
+DOC_TRUTH_FILES = (QUICKSTART, DOCS_INDEX, HTTP_API_DOC, CLAUDE)
+
+
+def test_no_phantom_server_module_reference():
+    """`wyrdforge.server` does not exist; no truth doc may name it."""
+    for doc in DOC_TRUTH_FILES:
+        assert doc.is_file(), f"missing doc-truth file: {doc}"
+        assert "wyrdforge.server" not in _read(doc), (
+            f"{doc.name} still references the nonexistent wyrdforge.server module"
+        )
+
+
+def test_documented_python_m_modules_exist():
+    """Every `python -m <module>` a truth doc names must be importable."""
+    named = set()
+    for doc in DOC_TRUTH_FILES:
+        named.update(re.findall(r"python -m ([a-zA-Z_][\w.]*)", _read(doc)))
+    assert "wyrdforge.bridges.http_api" in named, (
+        "the real server entry is no longer documented"
+    )
+    for module in sorted(named):
+        assert importlib.util.find_spec(module) is not None, (
+            f"documented module does not exist: {module}"
+        )
+
+
+def test_documented_server_entry_actually_runs():
+    """`python -m wyrdforge.bridges.http_api --help` must answer.
+
+    Before E5 the module had no main(): the documented invocation
+    exited silently doing nothing.  This pin keeps the entry real.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "wyrdforge.bridges.http_api", "--help"],
+        capture_output=True, text=True, timeout=60, cwd=REPO,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--port" in result.stdout
+
+
+def test_task_statuses_reconciled_with_roadmap():
+    """Phases ROADMAP marks complete must not say IN PROGRESS in TASK files."""
+    reconciled = (
+        "TASK_PHASE2_PERSISTENT_MEMORY.md",
+        "TASK_wyrd_phase12b.md", "TASK_wyrd_phase12c.md",
+        "TASK_wyrd_phase13.md", "TASK_wyrd_phase14.md",
+        "TASK_wyrd_phase15.md", "TASK_wyrd_phase16.md",
+        "TASK_wyrd_phase17.md", "TASK_wyrd_phase18.md",
+    )
+    for name in reconciled:
+        text = _read(REPO / name)
+        assert "IN PROGRESS" not in text, f"{name} still claims IN PROGRESS"
+        assert "COMPLETE" in text, f"{name} carries no COMPLETE status"
+
+
+def test_todo_reconciled():
+    todo = _read(REPO / "TODO.md")
+    assert "- [x] Create a plugin for Unity Engine." in todo
+    assert "- [ ] Create a plugin for Ollama." in todo
+    assert "- [ ] Create a plugin for VaM (Virt-a-Mate)." in todo
+
+
+def test_no_tracked_dotnet_build_outputs():
+    """bin/ and obj/ compiler output must stay out of the index (E5)."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"], capture_output=True, text=True,
+            timeout=60, cwd=REPO,
+        )
+    except OSError:
+        pytest.skip("git not available")
+    if result.returncode != 0:
+        pytest.skip("not a git checkout")
+    tracked = [
+        line for line in result.stdout.splitlines()
+        if "/bin/" in line or "/obj/" in line
+    ]
+    assert tracked == [], f"tracked build outputs remain: {tracked[:5]}"
+
+
+def test_parked_corpus_notes_present():
+    """The parked corpora carry their re-home-pending pointers (E5)."""
+    research_note = _read(REPO / "research_data" / "REHOME_PENDING.md")
+    assert "not part of the WYRD engine" in research_note
+    shared_note = _read(REPO / "docs" / "specs" / "shared" / "README.md")
+    assert "not WYRD specifications" in shared_note

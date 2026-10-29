@@ -2,7 +2,9 @@
 
 **Date started:** 2026-04-05
 **Branch:** development
-**Status:** IN PROGRESS
+**Status:** COMPLETE
+> Status reconciled 2026-10-29 (WYRD advancement Phase E5): ROADMAP.md's tracking table marks this phase complete; the status below now matches that verified state. Content otherwise preserved.
+
 
 ## Scope
 
@@ -51,15 +53,15 @@ _common.py provides:
 
 | Sub-phase | Deliverable | Status |
 |---|---|---|
-| 16A | install/_common.py + install_python.py (pygame, NSE, VGSK) | pending |
-| 16B | install_js.py (ST, Foundry, Roll20, Owlbear, DnDBeyond, RPGMaker, Construct3) | pending |
-| 16C | install_csharp.py (Unity, MonoGame, FGU, OpenSim) | pending |
-| 16D | install_native.py (Minecraft, Roblox, Godot, Defold) | pending |
-| 16E | install_cpp.py (Unreal, CryEngine, O3DE) | pending |
-| 16F | tests/ (~90 tests) | pending |
-| — | ROADMAP.md update | pending |
-| — | git commit + push | pending |
-| — | memory update | pending |
+| 16A | install/_common.py + install_python.py (pygame, NSE, VGSK) | complete |
+| 16B | install_js.py (ST, Foundry, Roll20, Owlbear, DnDBeyond, RPGMaker, Construct3) | complete |
+| 16C | install_csharp.py (Unity, MonoGame, FGU, OpenSim) | complete |
+| 16D | install_native.py (Minecraft, Roblox, Godot, Defold) | complete |
+| 16E | install_cpp.py (Unreal, CryEngine, O3DE) | complete |
+| 16F | tests/ (~90 tests) | complete |
+| — | ROADMAP.md update | complete |
+| — | git commit + push | complete |
+| — | memory update | complete |
 
 ## Next Steps (if session breaks)
 

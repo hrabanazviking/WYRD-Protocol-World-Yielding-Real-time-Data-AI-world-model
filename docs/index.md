@@ -26,7 +26,7 @@ LLM context:                      LLM context:
 | **ECS core** | Entities with typed components (identity, spatial, faction, runic) |
 | **Yggdrasil** | Zone → Region → Location → Sub-location spatial hierarchy |
 | **Passive Oracle** | 9 ground-truth query types — read-only world reporter |
-| **WyrdHTTPServer** | Language-agnostic REST API — any engine POSTs /query |
+| **WyrdHTTPServer** | Language-agnostic REST API — any engine POSTs /v1/query |
 | **wyrdforge memory** | 6 Norse-named memory stores (Hugin/Munin/Mimir/Wyrd/Orlog/Seidr) |
 | **Runic Metaphysics** | Hamingja, RunicCharge, AncestralResonance as ECS components |
 | **Bifrost Bridges** | 20+ engine adapters — Unity, Unreal, Godot, Foundry, Roblox, etc. |
@@ -37,12 +37,12 @@ LLM context:                      LLM context:
 
 ```python
 # Start the server
-# python -m wyrdforge.server --port 8765
+# python -m wyrdforge.bridges.http_api --port 8765
 
 import requests
 
 # Query world context for a character
-response = requests.post("http://localhost:8765/query", json={
+response = requests.post("http://localhost:8765/v1/query", json={
     "persona_id": "sigrid_stormborn",
     "user_input": "What do I know about the approaching army?",
     "use_turn_loop": False,

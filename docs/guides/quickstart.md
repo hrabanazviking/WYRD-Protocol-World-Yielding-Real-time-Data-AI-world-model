@@ -11,21 +11,28 @@ Get WYRD Protocol running in 5 minutes.
 
 ```bash
 git clone https://github.com/hrabanazviking/WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model
-cd WYRD-Protocol
+cd WYRD-Protocol-World-Yielding-Real-time-Data-AI-world-model
 pip install -e .
 ```
 
 ## Start the server
 
 ```bash
-python -m wyrdforge.server --port 8765
+python -m wyrdforge.bridges.http_api --port 8765
 # → [WyrdForge] WyrdHTTPServer listening on http://localhost:8765
 ```
+
+The server starts unauthenticated unless `WYRD_API_TOKEN` is set —
+keep it on localhost, or set a token before binding elsewhere.
+Endpoints live under `/v1/` (`/v1/query`, `/v1/event`, `/v1/world`,
+`/v1/facts`, `/v1/health`); the original unversioned paths remain
+as backwards-compatible aliases.
 
 ## Load a world
 
 ```bash
 python wyrd_chat_cli.py --world configs/worlds/thornholt.yaml --entity sigrid
+# or, after pip install: wyrd-chat --world configs/worlds/thornholt.yaml --entity sigrid
 ```
 
 ## Query from any language
@@ -35,7 +42,7 @@ python wyrd_chat_cli.py --world configs/worlds/thornholt.yaml --entity sigrid
     ```python
     import requests
 
-    r = requests.post("http://localhost:8765/query", json={
+    r = requests.post("http://localhost:8765/v1/query", json={
         "persona_id": "sigrid",
         "user_input": "Where am I?",
     })
@@ -62,7 +69,7 @@ python wyrd_chat_cli.py --world configs/worlds/thornholt.yaml --entity sigrid
 === "curl"
 
     ```bash
-    curl -X POST http://localhost:8765/query \
+    curl -X POST http://localhost:8765/v1/query \
       -H "Content-Type: application/json" \
       -d '{"persona_id":"sigrid","user_input":"Where am I?"}'
     ```
@@ -71,7 +78,7 @@ python wyrd_chat_cli.py --world configs/worlds/thornholt.yaml --entity sigrid
 
 ```bash
 # Tell WYRD something happened
-curl -X POST http://localhost:8765/event \
+curl -X POST http://localhost:8765/v1/event \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "observation",
@@ -86,6 +93,7 @@ curl -X POST http://localhost:8765/event \
 
 ```bash
 python tools/wyrd_tui.py --world configs/worlds/thornholt.yaml
+# or, after pip install wyrdforge[inspector]: wyrd-inspect-tui
 ```
 
 ## Next steps

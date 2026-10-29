@@ -33,10 +33,22 @@ cd integrations/foundry/wyrdforge && npm test
 
 ### Running the server
 ```bash
-python -m wyrdforge.server --port 8765
-# or
-python -m wyrdforge.bridges.http_api
+python -m wyrdforge.bridges.http_api --port 8765
 ```
+There is no `server` module under `wyrdforge` — `wyrdforge.bridges.http_api`
+is the server module, and since Phase E5 it carries a real `main()`
+(`--host` / `--port` / `--world-id` / `--db`), so the line above
+starts WyrdHTTPServer over a fresh PythonRPGBridge. Installed
+console scripts (Phase E2/E4): `wyrd-chat`, `wyrd-world`,
+`wyrd-backup`, `wyrd-inspect`, `wyrd-inspect-tui`.
+
+### Logging
+```python
+from wyrdforge.logging_config import configure_logging
+configure_logging()  # INFO text to stderr; WYRD_LOG_LEVEL / WYRD_LOG_FORMAT=json override
+```
+Opt-in (Phase E5): nothing configures logging on import. Modules
+log via `logging.getLogger(__name__)` under the `wyrdforge` tree.
 
 ### Running the chat CLI
 ```bash

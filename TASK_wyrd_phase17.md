@@ -2,7 +2,9 @@
 
 **Date started:** 2026-04-05
 **Branch:** development
-**Status:** IN PROGRESS
+**Status:** COMPLETE
+> Status reconciled 2026-10-29 (WYRD advancement Phase E5): ROADMAP.md's tracking table marks this phase complete; the status below now matches that verified state. Content otherwise preserved.
+
 
 ## Scope
 
@@ -54,11 +56,11 @@ WyrdSetup:
 
 | Sub-phase | Deliverable | Status |
 |---|---|---|
-| 17A | WyrdSetup, InstallLog, banner, menu, install flow | pending |
-| 17B | DiagnosticsEngine, retry loop, partial-install resume | pending |
-| 17C | --uninstall, --update, --check + argparse CLI | pending |
-| — | tests/test_setup.py (~70 tests) | pending |
-| — | ROADMAP.md update, commit, push, memory update | pending |
+| 17A | WyrdSetup, InstallLog, banner, menu, install flow | complete |
+| 17B | DiagnosticsEngine, retry loop, partial-install resume | complete |
+| 17C | --uninstall, --update, --check + argparse CLI | complete |
+| — | tests/test_setup.py (~70 tests) | complete |
+| — | ROADMAP.md update, commit, push, memory update | complete |
 
 ## Next Steps (if session breaks)
 
