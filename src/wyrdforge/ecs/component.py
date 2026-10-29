@@ -35,10 +35,23 @@ class Component(StrictModel):
 
 
 # ---------------------------------------------------------------------------
-# Component registry — maps type-name strings → Component subclasses
+# Component registry — maps type-name strings → Component subclasses,
+# plus each type's current schema version (Phase A4: registry with
+# versions). A type's current version is the default of its class's
+# ``schema_version`` field — the same value ``WorldStore.save()`` stamps
+# on every persisted row — so the registry can never drift from what
+# the components themselves declare.
 # ---------------------------------------------------------------------------
 
 _REGISTRY: dict[str, type[Component]] = {}
+_REGISTRY_VERSIONS: dict[str, str] = {}
+
+
+def _declared_schema_version(cls: type[Component]) -> str:
+    """The schema version a component class currently writes."""
+    field = cls.model_fields.get("schema_version")
+    default = getattr(field, "default", None)
+    return str(default) if default else "1.0"
 
 
 def register_component(cls: type[Component]) -> type[Component]:
@@ -48,6 +61,7 @@ def register_component(cls: type[Component]) -> type[Component]:
         raise TypeError(f"{cls.__name__} must set _type_key or have a Literal component_type default")
     if isinstance(key, str):
         _REGISTRY[key] = cls
+        _REGISTRY_VERSIONS[key] = _declared_schema_version(cls)
     return cls
 
 
@@ -61,6 +75,23 @@ def get_component_class(type_name: str) -> type[Component]:
 def registered_types() -> list[str]:
     """Return all registered component type names."""
     return list(_REGISTRY.keys())
+
+
+def get_component_version(type_name: str) -> str:
+    """Return the current schema version registered for a component type.
+
+    Raises:
+        KeyError: The type is not registered (same contract as
+            :func:`get_component_class`).
+    """
+    if type_name not in _REGISTRY_VERSIONS:
+        raise KeyError(f"No component registered for type '{type_name}'. Did you @register_component it?")
+    return _REGISTRY_VERSIONS[type_name]
+
+
+def registered_component_versions() -> dict[str, str]:
+    """Return a snapshot of the registry: type name → current schema version."""
+    return dict(_REGISTRY_VERSIONS)
 
 
 def deserialize_component(data: dict[str, Any]) -> Component:
