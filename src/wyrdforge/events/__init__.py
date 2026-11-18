@@ -1,4 +1,4 @@
-"""World-event intake with provenance (WY-T2) + HugrGate judgment binding (WY-T3)."""
+"""World-event intake (WY-T2) + HugrGate judgment binding (WY-T3) + awareness queries (WY-T4)."""
 from wyrdforge.events.intake import (
     EventIntake,
     StateChangeRecord,
@@ -6,6 +6,13 @@ from wyrdforge.events.intake import (
     WorldEvent,
     apply_tactical_event,
     compute_digest,
+)
+from wyrdforge.events.awareness import (
+    ActiveCombat,
+    AwarenessQuery,
+    AwarenessSnapshot,
+    NotableEvent,
+    ThreatReport,
 )
 from wyrdforge.events.judgment import (
     FixtureHugrGateClient,
@@ -25,4 +32,9 @@ __all__ = [
     "HttpHugrGateClient",
     "JudgmentBinding",
     "JudgmentRecord",
+    "ActiveCombat",
+    "AwarenessQuery",
+    "AwarenessSnapshot",
+    "NotableEvent",
+    "ThreatReport",
 ]
