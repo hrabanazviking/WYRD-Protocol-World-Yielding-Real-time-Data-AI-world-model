@@ -1,4 +1,4 @@
-"""World-event intake with provenance (WY-T2)."""
+"""World-event intake with provenance (WY-T2) + HugrGate judgment binding (WY-T3)."""
 from wyrdforge.events.intake import (
     EventIntake,
     StateChangeRecord,
@@ -6,6 +6,12 @@ from wyrdforge.events.intake import (
     WorldEvent,
     apply_tactical_event,
     compute_digest,
+)
+from wyrdforge.events.judgment import (
+    FixtureHugrGateClient,
+    HttpHugrGateClient,
+    JudgmentBinding,
+    JudgmentRecord,
 )
 
 __all__ = [
@@ -15,4 +21,8 @@ __all__ = [
     "WorldEvent",
     "apply_tactical_event",
     "compute_digest",
+    "FixtureHugrGateClient",
+    "HttpHugrGateClient",
+    "JudgmentBinding",
+    "JudgmentRecord",
 ]
